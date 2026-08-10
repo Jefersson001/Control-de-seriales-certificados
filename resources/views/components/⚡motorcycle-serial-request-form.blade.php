@@ -1,7 +1,7 @@
 <?php
 
 use App\Actions\MotorcycleSerialRequests\ExtractSerialsFromWorkbook;
-use App\Actions\MotorcycleSerialRequests\StoreProductSerialWorkbook;
+use App\Actions\MotorcycleSerialRequests\ExportProductLineSerials;
 use App\Actions\MotorcycleSerialRequests\StoreDuplicateSerialWorkbook;
 use App\Models\MotorcycleSerialRequest;
 use App\Models\MotorcycleSerialRequestLineSerial;
@@ -28,10 +28,6 @@ new class extends Component
     /** @var array<int, array{product_id: int|string|null, quantity: int|string, serials: string}> */
     public array $lines = [];
 
-    /** @var array<int, array{name: string|null, path: string|null}> */
-    #[Locked]
-    public array $lineFiles = [];
-
     /** @var array<int, int|null> */
     #[Locked]
     public array $lineRecordIds = [];
@@ -44,7 +40,8 @@ new class extends Component
 
     public string $serialSearch = '';
 
-    public mixed $serialWorkbook = null;
+    /** @var array<int, mixed> */
+    public array $serialWorkbooks = [];
 
     public ?string $importMessage = null;
 
@@ -98,10 +95,6 @@ new class extends Component
             'quantity' => $line->quantity,
             'serials' => $line->serialEntries->pluck('serial')->implode("\n"),
         ])->all();
-        $this->lineFiles = $serialRequest->lines->map(fn ($line): array => [
-            'name' => $line->source_file_name,
-            'path' => $line->source_file_path,
-        ])->all();
         $this->lineRecordIds = $serialRequest->lines->pluck('id')->all();
         $this->lineSerialMetadata = $serialRequest->lines->map(fn ($line): array => $line->serialEntries
             ->map(fn ($serial): array => [
@@ -146,7 +139,6 @@ new class extends Component
         abort_if($this->areLinesReadOnly(), 403);
 
         $this->lines[] = ['product_id' => null, 'quantity' => 1, 'serials' => ''];
-        $this->lineFiles[] = ['name' => null, 'path' => null];
         $this->lineRecordIds[] = null;
         $this->lineSerialMetadata[] = [];
     }
@@ -157,10 +149,8 @@ new class extends Component
         abort_if(! array_key_exists($index, $this->lines), 404);
 
         unset($this->lines[$index]);
-        unset($this->lineFiles[$index]);
         unset($this->lineRecordIds[$index], $this->lineSerialMetadata[$index]);
         $this->lines = array_values($this->lines);
-        $this->lineFiles = array_values($this->lineFiles);
         $this->lineRecordIds = array_values($this->lineRecordIds);
         $this->lineSerialMetadata = array_values($this->lineSerialMetadata);
         $this->serialModalLineIndex = null;
@@ -178,6 +168,20 @@ new class extends Component
     {
         $this->serialModalLineIndex = null;
         $this->serialSearch = '';
+    }
+
+    public function exportModalSerials(ExportProductLineSerials $exporter): mixed
+    {
+        abort_if($this->serialModalLineIndex === null || ! isset($this->lines[$this->serialModalLineIndex]), 404);
+
+        $line = $this->lines[$this->serialModalLineIndex];
+        $productName = Product::query()->find($line['product_id'])?->name ?? 'Producto';
+
+        return $exporter->handle(
+            $this->modalSerials(),
+            $this->requestId,
+            $productName,
+        );
     }
 
     public function closeSerialConflictModal(): void
@@ -252,26 +256,35 @@ new class extends Component
         )->values()->all();
     }
 
-    public function importSerialWorkbook(
-        ExtractSerialsFromWorkbook $extractor,
-        StoreProductSerialWorkbook $workbookStorage,
-    ): void
+    public function importSerialWorkbook(ExtractSerialsFromWorkbook $extractor): void
     {
         abort_if($this->areLinesReadOnly(), 403);
 
-        $this->resetErrorBag('serialWorkbook');
+        $this->resetErrorBag('serialWorkbooks');
         $this->importMessage = null;
         $this->validate([
-            'serialWorkbook' => ['required', 'file', 'mimes:xlsx', 'max:10240'],
+            'serialWorkbooks' => ['required', 'array', 'min:1'],
+            'serialWorkbooks.*' => ['file', 'mimes:xlsx', 'max:10240'],
         ], [
-            'serialWorkbook.required' => 'Selecciona un archivo Excel.',
-            'serialWorkbook.mimes' => 'El archivo debe estar en formato .xlsx.',
-            'serialWorkbook.max' => 'El archivo no puede superar 10 MB.',
+            'serialWorkbooks.required' => 'Selecciona al menos un archivo Excel.',
+            'serialWorkbooks.min' => 'Selecciona al menos un archivo Excel.',
+            'serialWorkbooks.*.mimes' => 'Todos los archivos deben estar en formato .xlsx.',
+            'serialWorkbooks.*.max' => 'Cada archivo puede tener un máximo de 10 MB.',
         ]);
 
         try {
-            $serials = $extractor->handle($this->serialWorkbook->getRealPath());
-            $serialsByNiv = collect($serials)->groupBy(fn (string $serial): string => substr($serial, 3, 2));
+            $selectedFileCount = count($this->serialWorkbooks);
+            $serials = collect();
+
+            foreach ($this->serialWorkbooks as $workbook) {
+                $serials->push(...$extractor->handle($workbook->getRealPath()));
+            }
+
+            $serialsByNiv = $serials
+                ->map(fn (string $serial): string => Str::upper(trim($serial)))
+                ->filter()
+                ->unique()
+                ->groupBy(fn (string $serial): string => substr($serial, 3, 2));
             $productsByNiv = Product::query()
                 ->whereNotNull('niv')
                 ->get(['id', 'name', 'niv'])
@@ -300,57 +313,34 @@ new class extends Component
 
             if (count($this->lines) === 1 && empty($this->lines[0]['product_id']) && trim($this->lines[0]['serials']) === '') {
                 $this->lines = [];
-                $this->lineFiles = [];
                 $this->lineRecordIds = [];
                 $this->lineSerialMetadata = [];
             }
 
-            $originalName = $this->serialWorkbook->getClientOriginalName();
-            $singleProductFile = $serialsByNiv->count() === 1
-                ? [
-                    'name' => $originalName,
-                    'path' => $this->serialWorkbook->store('motorcycle-serial-request-workbooks', 'local'),
-                ]
-                : null;
-
             foreach ($serialsByNiv as $niv => $productSerials) {
                 $product = $productsByNiv->get($niv)->first();
-                $lineFile = $singleProductFile ?? $workbookStorage->handle(
-                    $product->name,
-                    $niv,
-                    $productSerials->values()->all(),
-                );
                 $this->lines[] = [
                     'product_id' => $product->id,
                     'quantity' => $productSerials->count(),
                     'serials' => $productSerials->implode("\n"),
                 ];
-                $this->lineFiles[] = $lineFile;
                 $this->lineRecordIds[] = null;
                 $this->lineSerialMetadata[] = [];
             }
 
-            $this->serialWorkbook = null;
+            $this->serialWorkbooks = [];
             $importedSerialCount = $serialsByNiv->sum(fn ($productSerials): int => $productSerials->count());
-            $this->importMessage = $importedSerialCount.' seriales cargados correctamente en '.$serialsByNiv->count().' línea(s) de producto.';
+            $this->importMessage = $selectedFileCount.' archivo(s) procesado(s): '.$importedSerialCount.' seriales cargados en '.$serialsByNiv->count().' línea(s) de producto.';
 
             if ($ignoredSerialCount > 0) {
                 $this->importMessage .= ' Se ignoraron '.$ignoredSerialCount.' seriales cuyo NIV no pertenece a un producto registrado.';
             }
         } catch (\RuntimeException $exception) {
-            $this->addError('serialWorkbook', $exception->getMessage());
+            $this->addError('serialWorkbooks', $exception->getMessage());
         } catch (\Throwable $exception) {
             report($exception);
-            $this->addError('serialWorkbook', 'No fue posible procesar el archivo Excel. Verifica que no esté dañado e inténtalo nuevamente.');
+            $this->addError('serialWorkbooks', 'No fue posible procesar uno de los archivos Excel. Verifica que no esté dañado e inténtalo nuevamente.');
         }
-    }
-
-    public function downloadLineFile(int $index): mixed
-    {
-        $file = $this->lineFiles[$index] ?? null;
-        abort_if($file === null || empty($file['path']) || ! Storage::disk('local')->exists($file['path']), 404);
-
-        return Storage::disk('local')->download($file['path'], $file['name'] ?: basename($file['path']));
     }
 
     public function canDeleteRequest(): bool
@@ -560,13 +550,7 @@ new class extends Component
                     : 'Solicitud actualizada correctamente.';
             }
 
-            $products = Product::query()
-                ->whereIn('id', collect($validated['lines'])->pluck('product_id'))
-                ->get(['id', 'name', 'niv'])
-                ->keyBy('id');
-            $workbookStorage = app(StoreProductSerialWorkbook::class);
-            $lines = collect($validated['lines'])->map(function (array $line, int $index) use ($products, $serialRequest, $workbookStorage): array {
-                $product = $products->get($line['product_id']);
+            $lines = collect($validated['lines'])->map(function (array $line): array {
                 $serials = array_values(array_unique(array_filter(array_map(
                     fn (string $serial): string => Str::upper(trim($serial)),
                     preg_split('/\R/u', $line['serials']) ?: [],
@@ -576,14 +560,6 @@ new class extends Component
                 return [
                     'attributes' => [
                         ...$line,
-                        'source_file_name' => empty($this->lineFiles[$index]['path'])
-                            ? null
-                            : $workbookStorage->fileName(
-                                $serialRequest->id,
-                                $product->name,
-                                Str::upper(trim((string) $product->niv)),
-                            ),
-                        'source_file_path' => $this->lineFiles[$index]['path'] ?? null,
                     ],
                     'serials' => $serials,
                 ];
@@ -715,7 +691,7 @@ new class extends Component
 
                 @unless ($this->areLinesReadOnly())
                     <label class="inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 rounded-xl bg-violet-600 px-5 py-3 font-semibold text-white shadow-sm transition hover:bg-violet-500">
-                        <input id="serial-workbook" wire:model="serialWorkbook" type="file" accept=".xlsx" class="sr-only">
+                        <input id="serial-workbooks" wire:model="serialWorkbooks" type="file" accept=".xlsx" multiple class="sr-only">
                         <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0-4 4m4-4 4 4M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3"/>
                         </svg>
@@ -725,18 +701,23 @@ new class extends Component
             </div>
 
             @unless ($this->areLinesReadOnly())
-                <div wire:loading wire:target="serialWorkbook" class="mb-6 w-full rounded-2xl border border-violet-200 bg-violet-50 px-5 py-4 text-sm font-semibold text-violet-700 dark:border-violet-500/20 dark:bg-violet-500/10 dark:text-violet-200">
+                <div wire:loading wire:target="serialWorkbooks" class="mb-6 w-full rounded-2xl border border-violet-200 bg-violet-50 px-5 py-4 text-sm font-semibold text-violet-700 dark:border-violet-500/20 dark:bg-violet-500/10 dark:text-violet-200">
                     <span class="inline-flex items-center gap-2">
                         <svg class="size-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle class="opacity-25" cx="12" cy="12" r="9" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M21 12a9 9 0 0 0-9-9v3a6 6 0 0 1 6 6h3Z"/></svg>
                         Cargando archivo...
                     </span>
                 </div>
 
-                @if ($serialWorkbook)
-                    <div wire:loading.remove wire:target="serialWorkbook" class="mb-6 flex w-full flex-col gap-4 rounded-2xl border border-violet-200 bg-violet-50 p-5 dark:border-violet-500/20 dark:bg-violet-500/10 sm:flex-row sm:items-center sm:justify-between">
+                @if ($serialWorkbooks !== [])
+                    <div wire:loading.remove wire:target="serialWorkbooks" class="mb-6 flex w-full flex-col gap-4 rounded-2xl border border-violet-200 bg-violet-50 p-5 dark:border-violet-500/20 dark:bg-violet-500/10 sm:flex-row sm:items-center sm:justify-between">
                         <div class="min-w-0">
-                            <p class="truncate font-semibold text-violet-950 dark:text-violet-100">{{ $serialWorkbook->getClientOriginalName() }}</p>
-                            <p class="mt-1 text-sm text-violet-700 dark:text-violet-300">Se analizarán todas las hojas. Las posiciones 4 y 5 de cada serial deben coincidir con el NIV de un producto registrado.</p>
+                            <p class="font-semibold text-violet-950 dark:text-violet-100">{{ count($serialWorkbooks) }} archivo(s) seleccionado(s)</p>
+                            <ul class="mt-2 space-y-1 text-sm text-violet-800 dark:text-violet-200">
+                                @foreach ($serialWorkbooks as $workbook)
+                                    <li wire:key="selected-workbook-{{ $loop->index }}" class="truncate">{{ $workbook->getClientOriginalName() }}</li>
+                                @endforeach
+                            </ul>
+                            <p class="mt-2 text-sm text-violet-700 dark:text-violet-300">Se analizarán todas las hojas de cada archivo. Las posiciones 4 y 5 de cada serial deben coincidir con el NIV de un producto registrado.</p>
                         </div>
                         <button wire:click="importSerialWorkbook" wire:loading.attr="disabled" wire:target="importSerialWorkbook" type="button" class="shrink-0 rounded-xl bg-violet-600 px-5 py-3 font-semibold text-white transition hover:bg-violet-500 disabled:cursor-wait disabled:opacity-60">
                             <span wire:loading.remove wire:target="importSerialWorkbook">Procesar Excel</span>
@@ -745,20 +726,20 @@ new class extends Component
                     </div>
                 @endif
 
-                @error('serialWorkbook') <p class="mb-6 rounded-xl bg-rose-100 px-4 py-3 text-sm font-medium text-rose-700 dark:bg-rose-500/15 dark:text-rose-200">{{ $message }}</p> @enderror
+                @error('serialWorkbooks') <p class="mb-6 rounded-xl bg-rose-100 px-4 py-3 text-sm font-medium text-rose-700 dark:bg-rose-500/15 dark:text-rose-200">{{ $message }}</p> @enderror
+                @error('serialWorkbooks.*') <p class="mb-6 rounded-xl bg-rose-100 px-4 py-3 text-sm font-medium text-rose-700 dark:bg-rose-500/15 dark:text-rose-200">{{ $message }}</p> @enderror
                 @if ($importMessage)
                     <p role="status" class="mb-6 rounded-xl bg-emerald-100 px-4 py-3 text-sm font-medium text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200">{{ $importMessage }}</p>
                 @endif
             @endunless
 
             <div class="overflow-x-auto rounded-xl border border-slate-200 dark:border-white/10">
-                <table class="w-full min-w-5xl table-fixed text-left">
+                <table class="w-full min-w-4xl table-fixed text-left">
                     <thead class="bg-slate-100/80 text-xs uppercase tracking-wider text-slate-500 dark:bg-slate-950/60 dark:text-slate-400">
                         <tr>
-                            <th class="w-[28%] px-4 py-3 font-semibold">Producto</th>
+                            <th class="w-[35%] px-4 py-3 font-semibold">Producto</th>
                             <th class="w-32 px-4 py-3 font-semibold">Cantidad</th>
                             <th class="px-4 py-3 font-semibold">Seriales</th>
-                            <th class="w-56 px-4 py-3 font-semibold">Archivo Excel</th>
                             <th class="w-14 px-2 py-3"><span class="sr-only">Acciones</span></th>
                         </tr>
                     </thead>
@@ -785,16 +766,6 @@ new class extends Component
                                     </button>
                                     @error("lines.{$index}.serials") <p class="px-3 pb-2 text-xs text-rose-600 dark:text-rose-300">{{ $message }}</p> @enderror
                                 </td>
-                                <td class="p-3">
-                                    @if (! empty($lineFiles[$index]['path']))
-                                        <button wire:click="downloadLineFile({{ $index }})" type="button" class="flex max-w-full items-center gap-2 text-left text-sm font-semibold text-violet-600 hover:text-violet-500 dark:text-violet-300">
-                                            <svg class="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14"/></svg>
-                                            <span class="truncate" title="{{ $lineFiles[$index]['name'] }}">{{ $lineFiles[$index]['name'] }}</span>
-                                        </button>
-                                    @else
-                                        <span class="text-xs text-slate-400">Sin archivo</span>
-                                    @endif
-                                </td>
                                 <td class="p-2 text-center">
                                     @if (! $this->areLinesReadOnly())
                                         <button wire:click="removeLine({{ $index }})" type="button" class="grid size-9 place-items-center rounded-lg text-slate-400 transition hover:bg-rose-100 hover:text-rose-600 dark:hover:bg-rose-500/10 dark:hover:text-rose-300" aria-label="Quitar línea {{ $index + 1 }}">
@@ -807,7 +778,7 @@ new class extends Component
 
                         @unless ($this->areLinesReadOnly())
                             <tr>
-                                <td colspan="5" class="px-4 py-3">
+                                <td colspan="4" class="px-4 py-3">
                                     <button wire:click="addLine" type="button" class="text-sm font-semibold text-violet-600 transition hover:text-violet-500 dark:text-violet-300">Agregar una línea</button>
                                 </td>
                             </tr>
@@ -876,9 +847,25 @@ new class extends Component
 
                     <div class="border-b border-slate-200 bg-slate-50/70 px-6 py-4 dark:border-white/10 dark:bg-slate-950/30 sm:px-8">
                         <label for="serial-search" class="sr-only">Buscar serial</label>
-                        <div class="relative max-w-xl">
-                            <svg class="pointer-events-none absolute left-4 top-1/2 size-5 -translate-y-1/2 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path stroke-linecap="round" d="m20 20-4-4"/></svg>
-                            <input id="serial-search" wire:model.live.debounce.250ms="serialSearch" type="search" autocomplete="off" placeholder="Buscar un serial..." class="w-full rounded-xl border border-slate-300 bg-white py-3 pl-12 pr-4 text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-violet-500 focus:ring-4 focus:ring-violet-500/10 dark:border-white/10 dark:bg-slate-900 dark:text-white dark:focus:border-violet-400">
+                        <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
+                            <div class="relative w-full max-w-xl">
+                                <svg class="pointer-events-none absolute left-4 top-1/2 size-5 -translate-y-1/2 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path stroke-linecap="round" d="m20 20-4-4"/></svg>
+                                <input id="serial-search" wire:model.live.debounce.250ms="serialSearch" type="search" autocomplete="off" placeholder="Buscar un serial..." class="w-full rounded-xl border border-slate-300 bg-white py-3 pl-12 pr-4 text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-violet-500 focus:ring-4 focus:ring-violet-500/10 dark:border-white/10 dark:bg-slate-900 dark:text-white dark:focus:border-violet-400">
+                            </div>
+                            <button
+                                wire:click="exportModalSerials"
+                                wire:loading.attr="disabled"
+                                wire:target="exportModalSerials"
+                                type="button"
+                                @disabled($this->modalSerials() === [])
+                                class="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border-2 border-slate-950 bg-white px-5 py-3 font-bold text-slate-950 transition hover:bg-slate-950 hover:text-white disabled:cursor-not-allowed disabled:opacity-40 dark:border-white dark:bg-slate-900 dark:text-white dark:hover:bg-white dark:hover:text-slate-950"
+                            >
+                                <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14"/>
+                                </svg>
+                                <span wire:loading.remove wire:target="exportModalSerials">Exportar seriales</span>
+                                <span wire:loading wire:target="exportModalSerials">Exportando...</span>
+                            </button>
                         </div>
                     </div>
 

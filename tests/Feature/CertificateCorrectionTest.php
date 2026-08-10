@@ -18,7 +18,7 @@ test('administrators can access the certificate correction module', function () 
         ->assertSee('Corrección Maestro Seriales Certificados');
 });
 
-test('authorized users can see and access the certificate correction menu', function () {
+test('authorized users can access the hidden certificate correction module directly', function () {
     $user = User::factory()->create([
         'permissions' => [UserPermission::ViewCertificateCorrections->value],
     ]);
@@ -26,8 +26,7 @@ test('authorized users can see and access the certificate correction menu', func
     $this->actingAs($user)
         ->get(route('dashboard'))
         ->assertSuccessful()
-        ->assertSee(route('certificate_corrections.index'))
-        ->assertSee('Corrección Maestro Seriales Certificados');
+        ->assertDontSee(route('certificate_corrections.index'));
 
     $this->actingAs($user)
         ->get(route('certificate_corrections.index'))

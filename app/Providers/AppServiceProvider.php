@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Models\SystemSetting;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
@@ -23,6 +24,12 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        if (app('db')->getSchemaBuilder()->hasTable('system_settings')) {
+            config([
+                'livewire.payload.max_size' => SystemSetting::livewirePayloadMaxMb() * 1024 * 1024,
+            ]);
+        }
+
         $this->configureDefaults();
     }
 

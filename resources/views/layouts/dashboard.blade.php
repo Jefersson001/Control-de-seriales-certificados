@@ -54,36 +54,21 @@
                         </a>
                     @endif
 
-                    @if (auth()->user()->hasPermission(App\UserPermission::ViewCertificateCorrections))
-                        <a
-                            href="{{ route('certificate_corrections.index') }}"
-                            @class([
-                                'flex items-start gap-3 rounded-xl px-4 py-3 text-sm font-medium transition',
-                                'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300' => request()->routeIs('certificate_corrections.*'),
-                                'text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-white' => ! request()->routeIs('certificate_corrections.*'),
-                            ])
-                        >
-                            <svg class="mt-0.5 size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6.75 17.25 10.5M4.5 19.5l3.621-.724a2.25 2.25 0 0 0 1.159-.616l9.19-9.19a2.652 2.652 0 0 0-3.75-3.75l-9.19 9.19a2.25 2.25 0 0 0-.616 1.159L4.5 19.5Z"/>
-                            </svg>
-                            <span class="leading-5">Corrección Maestro Seriales Certificados</span>
-                        </a>
-                    @endif
-
                     @if (
                         auth()->user()->hasPermission(App\UserPermission::ViewUsers)
                         || auth()->user()->hasPermission(App\UserPermission::ViewProducts)
+                        || auth()->user()->hasPermission(App\UserPermission::ViewSystemSettings)
                     )
                         <details
                             data-configuration-menu
                             class="group order-[999]"
-                            @if (request()->routeIs('users.*', 'products.*')) open @endif
+                            @if (request()->routeIs('users.*', 'products.*', 'system_settings.*')) open @endif
                         >
                             <summary
                                 @class([
                                     'flex cursor-pointer list-none items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition [&::-webkit-details-marker]:hidden',
-                                    'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300' => request()->routeIs('users.*', 'products.*'),
-                                    'text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-white' => ! request()->routeIs('users.*', 'products.*'),
+                                    'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300' => request()->routeIs('users.*', 'products.*', 'system_settings.*'),
+                                    'text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-white' => ! request()->routeIs('users.*', 'products.*', 'system_settings.*'),
                                 ])
                             >
                                 <svg class="size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
@@ -127,6 +112,23 @@
                                             <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 7.5V16.5L12 21m0-9v9m8.25-13.5V16.5L12 21"/>
                                         </svg>
                                         Productos
+                                    </a>
+                                @endif
+
+                                @if (auth()->user()->hasPermission(App\UserPermission::ViewSystemSettings))
+                                    <a
+                                        href="{{ route('system_settings.index') }}"
+                                        @class([
+                                            'flex items-center gap-3 rounded-xl px-4 py-2.5 text-sm font-medium transition',
+                                            'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300' => request()->routeIs('system_settings.*'),
+                                            'text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-white' => ! request()->routeIs('system_settings.*'),
+                                        ])
+                                    >
+                                        <svg class="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v3m0 12v3M3 12h3m12 0h3M5.64 5.64l2.12 2.12m8.48 8.48 2.12 2.12m0-12.72-2.12 2.12M7.76 16.24l-2.12 2.12"/>
+                                            <circle cx="12" cy="12" r="3"/>
+                                        </svg>
+                                        Parámetros del sistema
                                     </a>
                                 @endif
                             </div>
@@ -192,6 +194,69 @@
                                             <circle cx="12" cy="12.75" r="3"/>
                                         </svg>
                                         <span class="leading-5">Gestión de Constancia de Registro de Número de Identificación de Vehículo</span>
+                                    </a>
+                                @endif
+                            </div>
+                        </details>
+                    @endif
+
+                    @if (
+                        auth()->user()->hasPermission(App\UserPermission::ViewDispatches)
+                        || auth()->user()->hasPermission(App\UserPermission::ViewReturns)
+                    )
+                        <details
+                            data-dispatch-menu
+                            class="group order-[998]"
+                            @if (request()->routeIs('dispatches.*', 'returns.*')) open @endif
+                        >
+                            <summary
+                                @class([
+                                    'flex cursor-pointer list-none items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition [&::-webkit-details-marker]:hidden',
+                                    'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300' => request()->routeIs('dispatches.*', 'returns.*'),
+                                    'text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-white' => ! request()->routeIs('dispatches.*', 'returns.*'),
+                                ])
+                            >
+                                <svg class="size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h10.5v9H3.75v-9Zm10.5 3h3l3 3v3h-6v-6Z"/>
+                                    <circle cx="7.5" cy="18" r="2.25"/>
+                                    <circle cx="17.25" cy="18" r="2.25"/>
+                                </svg>
+                                <span class="grow">Despacho</span>
+                                <svg class="size-4 shrink-0 transition-transform duration-200 group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/>
+                                </svg>
+                            </summary>
+
+                            <div class="ml-6 mt-2 flex flex-col gap-1 border-l border-slate-200 pl-3 dark:border-white/10">
+                                @if (auth()->user()->hasPermission(App\UserPermission::ViewDispatches))
+                                    <a
+                                        href="{{ route('dispatches.index') }}"
+                                        @class([
+                                            'flex items-center gap-3 rounded-xl px-4 py-2.5 text-sm font-medium transition',
+                                            'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300' => request()->routeIs('dispatches.*'),
+                                            'text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-white' => ! request()->routeIs('dispatches.*'),
+                                        ])
+                                    >
+                                        <svg class="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 5.25h15v13.5h-15V5.25Zm3 3h9m-9 3.75h9m-9 3.75h5.25"/>
+                                        </svg>
+                                        Despacho
+                                    </a>
+                                @endif
+
+                                @if (auth()->user()->hasPermission(App\UserPermission::ViewReturns))
+                                    <a
+                                        href="{{ route('returns.index') }}"
+                                        @class([
+                                            'flex items-center gap-3 rounded-xl px-4 py-2.5 text-sm font-medium transition',
+                                            'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300' => request()->routeIs('returns.*'),
+                                            'text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-white' => ! request()->routeIs('returns.*'),
+                                        ])
+                                    >
+                                        <svg class="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="m9 7.5-4.5 4.5L9 16.5M4.5 12h9a6 6 0 0 1 6 6"/>
+                                        </svg>
+                                        Devoluciones
                                     </a>
                                 @endif
                             </div>

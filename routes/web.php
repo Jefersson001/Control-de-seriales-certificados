@@ -18,6 +18,15 @@ Route::post('/login', AuthenticateUserController::class)
 Route::view('/dashboard', 'dashboard')
     ->middleware(['auth', 'password.not_expired'])
     ->name('dashboard');
+Route::view('/parametros-del-sistema', 'system-settings.index')
+    ->middleware(['auth', 'password.not_expired', 'permission:system-settings.view'])
+    ->name('system_settings.index');
+Route::view('/despacho', 'dispatches.index')
+    ->middleware(['auth', 'password.not_expired', 'permission:dispatches.view'])
+    ->name('dispatches.index');
+Route::view('/devoluciones', 'returns.index')
+    ->middleware(['auth', 'password.not_expired', 'permission:returns.view'])
+    ->name('returns.index');
 Route::view('/maestro-seriales-certificados', 'certificates.index')
     ->middleware(['auth', 'password.not_expired', 'permission:certificates.view'])
     ->name('certificates.index');

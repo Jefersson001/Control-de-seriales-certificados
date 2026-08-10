@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\CertificateStatus;
 use Database\Factories\MsCertificadoFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
@@ -18,15 +19,21 @@ use Illuminate\Support\Carbon;
  * @property string $fabricacion
  * @property int $anio
  * @property string $niv
+ * @property CertificateStatus $status
  * @property string $codigo
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
-#[Fillable(['no', 'marca', 'modelo', 'tipo', 'fabricacion', 'anio', 'niv', 'codigo'])]
+#[Fillable(['no', 'marca', 'modelo', 'tipo', 'fabricacion', 'anio', 'niv', 'status', 'codigo'])]
 class MsCertificado extends Model
 {
     /** @use HasFactory<MsCertificadoFactory> */
     use HasFactory;
+
+    /** @var array<string, mixed> */
+    protected $attributes = [
+        'status' => CertificateStatus::PendingDispatch->value,
+    ];
 
     /**
      * @param  Builder<MsCertificado>  $query
@@ -67,6 +74,15 @@ class MsCertificado extends Model
                         ->havingRaw('COUNT(*) >= 2'),
                 );
             })
+            ->when($filter === 'unique_niv', function (Builder $query): void {
+                $query->whereIn(
+                    'niv',
+                    self::query()
+                        ->select('niv')
+                        ->groupBy('niv')
+                        ->havingRaw('COUNT(*) = 1'),
+                );
+            })
             ->when($filter === 'invalid_niv_length', function (Builder $query): void {
                 $query->whereRaw('LENGTH(TRIM(niv)) <> 17');
             })
@@ -92,6 +108,18 @@ class MsCertificado extends Model
     }
 
     /**
+     * @param  Builder<MsCertificado>  $query
+     * @return Builder<MsCertificado>
+     */
+    public function scopeFilterByCertificateStatus(Builder $query, ?string $status): Builder
+    {
+        return $query->when(
+            CertificateStatus::tryFrom($status ?? '') !== null,
+            fn (Builder $query): Builder => $query->where('status', $status),
+        );
+    }
+
+    /**
      * Get the attributes that should be cast.
      *
      * @return array<string, string>
@@ -100,6 +128,7 @@ class MsCertificado extends Model
     {
         return [
             'anio' => 'integer',
+            'status' => CertificateStatus::class,
         ];
     }
 }

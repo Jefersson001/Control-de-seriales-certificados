@@ -16,6 +16,7 @@ test('the certificates table has the required structure', function () {
         'fabricacion',
         'anio',
         'niv',
+        'status',
         'codigo',
         'created_at',
         'updated_at',

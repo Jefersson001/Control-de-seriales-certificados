@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['motorcycle_serial_request_id', 'product_id', 'quantity', 'source_file_name', 'source_file_path'])]
+#[Fillable(['motorcycle_serial_request_id', 'product_id', 'quantity'])]
 class MotorcycleSerialRequestLine extends Model
 {
     /** @use HasFactory<MotorcycleSerialRequestLineFactory> */

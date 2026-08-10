@@ -1,5 +1,6 @@
 <?php
 
+use App\CertificateStatus;
 use App\Models\MsCertificado;
 use App\Models\User;
 use App\UserPermission;
@@ -111,6 +112,106 @@ test('certificates can be filtered by duplicated niv values', function () {
         ->assertSee('DUPLICADO-UNO')
         ->assertSee('DUPLICADO-DOS')
         ->assertDontSee('REGISTRO-UNICO');
+});
+
+test('certificates can be filtered by dispatch status', function () {
+    $user = User::factory()->create([
+        'permissions' => [UserPermission::ViewCertificates->value],
+    ]);
+    MsCertificado::factory()->create([
+        'no' => 'POR-DESPACHAR',
+        'status' => CertificateStatus::PendingDispatch,
+    ]);
+    MsCertificado::factory()->create([
+        'no' => 'DESPACHADO',
+        'status' => CertificateStatus::Dispatched,
+    ]);
+    MsCertificado::factory()->create([
+        'no' => 'DEVUELTO',
+        'status' => CertificateStatus::Returned,
+    ]);
+
+    $this->actingAs($user);
+
+    Livewire::test('certificate-master')
+        ->assertSee('Todos los status')
+        ->assertSee('Por despachar')
+        ->assertSee('Despachado')
+        ->assertSee('Devuelto')
+        ->set('statusFilter', CertificateStatus::Dispatched->value)
+        ->assertSee('DESPACHADO')
+        ->assertDontSee('POR-DESPACHAR')
+        ->assertDontSee('DEVUELTO');
+});
+
+test('certificates can be filtered by unique niv values', function () {
+    $user = User::factory()->create([
+        'permissions' => [UserPermission::ViewCertificates->value],
+    ]);
+    MsCertificado::factory()->create([
+        'no' => 'DUPLICADO-UNO',
+        'niv' => 'NIV-REPETIDO',
+    ]);
+    MsCertificado::factory()->create([
+        'no' => 'DUPLICADO-DOS',
+        'niv' => 'NIV-REPETIDO',
+    ]);
+    MsCertificado::factory()->create([
+        'no' => 'REGISTRO-UNICO',
+        'niv' => 'NIV-UNICO',
+    ]);
+
+    $this->actingAs($user);
+
+    Livewire::test('certificate-master')
+        ->assertSee('NIV únicos')
+        ->set('recordFilter', 'unique_niv')
+        ->assertSee('REGISTRO-UNICO')
+        ->assertDontSee('DUPLICADO-UNO')
+        ->assertDontSee('DUPLICADO-DOS');
+});
+
+test('certificates can be grouped by certificate number', function () {
+    $user = User::factory()->create([
+        'permissions' => [UserPermission::ViewCertificates->value],
+    ]);
+    MsCertificado::factory()->create([
+        'no' => 'REGISTRO-B',
+        'codigo' => 'CERTIFICADO-B',
+    ]);
+    MsCertificado::factory()->create([
+        'no' => 'REGISTRO-A',
+        'codigo' => 'CERTIFICADO-A',
+    ]);
+    MsCertificado::factory()->create([
+        'no' => 'REGISTRO-A-DOS',
+        'codigo' => 'CERTIFICADO-A',
+    ]);
+
+    $this->actingAs($user);
+
+    $component = Livewire::test('certificate-master')
+        ->assertSee('Agrupar por No Certificado')
+        ->set('perPage', 2)
+        ->set('recordFilter', 'group_by_certificate')
+        ->assertSee('No Certificado')
+        ->assertSee('Cantidad')
+        ->assertSeeInOrder([
+            'CERTIFICADO-A',
+            'CERTIFICADO-B',
+        ])
+        ->assertDontSee('REGISTRO-A')
+        ->assertDontSee('REGISTRO-A-DOS')
+        ->assertDontSee('REGISTRO-B');
+
+    expect($component->get('certificateGroupCounts'))->toBe([
+        'CERTIFICADO-A' => 2,
+        'CERTIFICADO-B' => 1,
+    ]);
+    expect($component->get('certificates')->getCollection()->pluck('aggregate', 'codigo')->all())->toBe([
+        'CERTIFICADO-A' => 2,
+        'CERTIFICADO-B' => 1,
+    ]);
 });
 
 test('certificates can be filtered by niv values with an invalid length', function () {

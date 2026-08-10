@@ -345,6 +345,11 @@ new class extends Component
             $validated['permissions'] = array_values(array_unique($validated['permissions']));
         }
 
+        if (in_array(UserPermission::EditSystemSettings->value, $validated['permissions'], true)) {
+            $validated['permissions'][] = UserPermission::ViewSystemSettings->value;
+            $validated['permissions'] = array_values(array_unique($validated['permissions']));
+        }
+
         if ($this->editingUserId !== null) {
             $user = User::query()->findOrFail($this->editingUserId);
             $this->authorizeTargetUser($user);

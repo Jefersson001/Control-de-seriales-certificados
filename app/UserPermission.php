@@ -24,6 +24,10 @@ enum UserPermission: string
     case ViewVehicleIdentificationRecord = 'vehicle-identification-record.view';
     case ViewVehicleIdentificationRecordManagement = 'vehicle-identification-record-management.view';
     case EditVehicleIdentificationRecordManagement = 'vehicle-identification-record-management.edit';
+    case ViewSystemSettings = 'system-settings.view';
+    case EditSystemSettings = 'system-settings.edit';
+    case ViewDispatches = 'dispatches.view';
+    case ViewReturns = 'returns.view';
 
     public function label(): string
     {
@@ -48,6 +52,10 @@ enum UserPermission: string
             self::ViewVehicleIdentificationRecord => 'Constancia de Registro de Número de Identificación de Vehículo',
             self::ViewVehicleIdentificationRecordManagement => 'Gestión de Constancia de Registro de Número de Identificación de Vehículo',
             self::EditVehicleIdentificationRecordManagement => 'Editar Gestión de Constancia de Registro de Número de Identificación de Vehículo',
+            self::ViewSystemSettings => 'Consultar parámetros del sistema',
+            self::EditSystemSettings => 'Editar parámetros del sistema',
+            self::ViewDispatches => 'Consultar Despacho',
+            self::ViewReturns => 'Consultar Devoluciones',
         };
     }
 }

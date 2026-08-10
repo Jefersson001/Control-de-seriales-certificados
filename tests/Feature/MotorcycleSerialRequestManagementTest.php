@@ -1,15 +1,16 @@
 <?php
 
+use App\Actions\MotorcycleSerialRequests\ExtractSerialsFromWorkbook;
 use App\Models\MotorcycleSerialRequest;
 use App\Models\MotorcycleSerialRequestLineSerial;
 use App\Models\Product;
-use App\Actions\MotorcycleSerialRequests\ExtractSerialsFromWorkbook;
 use App\Models\User;
 use App\MotorcycleSerialRequestStatus;
 use App\UserPermission;
 use App\UserRole;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use OpenSpout\Common\Entity\Row;
@@ -205,7 +206,7 @@ test('a request can contain multiple product lines with serials', function () {
         ->and($serialRequest->lines->pluck('product_id')->all())->toBe([$firstProduct->id, $secondProduct->id]);
 });
 
-test('an excel workbook creates product lines from chassis serials and preserves the source file', function () {
+test('an excel workbook creates product lines from chassis serials without storing the source file', function () {
     Storage::fake('local');
     $user = User::factory()->create([
         'permissions' => [
@@ -230,26 +231,27 @@ test('an excel workbook creates product lines from chassis serials and preserves
     $this->actingAs($user);
 
     Livewire::test('motorcycle-serial-request-form')
+        ->assertDontSee('Archivo Excel')
         ->assertDontSee('Procesar Excel')
-        ->set('serialWorkbook', $upload)
+        ->set('serialWorkbooks', [$upload])
         ->assertSee('Procesar Excel')
         ->call('importSerialWorkbook')
         ->assertHasNoErrors()
         ->assertSet('lines.0.product_id', $product->id)
         ->assertSet('lines.0.quantity', 2)
-        ->assertSet('lineFiles.0.name', 'BR150 BRF AÑO 2026.xlsx')
         ->call('save')
         ->assertHasNoErrors();
 
     $line = MotorcycleSerialRequest::query()->firstOrFail()->lines()->firstOrFail();
 
     expect($line->serialEntries()->orderBy('id')->pluck('serial')->all())
-        ->toBe(['8YZC7MCC9TD033582', 'ABCC7MCC0TD011111'])
-        ->and($line->source_file_name)->toBe('Solicitud 1 - BR 150 BRF - C7.xlsx');
-    Storage::disk('local')->assertExists($line->source_file_path);
+        ->toBe(['8YZC7MCC9TD033582', 'ABCC7MCC0TD011111']);
+    Storage::disk('local')->assertDirectoryEmpty('motorcycle-serial-request-workbooks');
+    expect(Schema::hasColumn('motorcycle_serial_request_lines', 'source_file_name'))->toBeFalse()
+        ->and(Schema::hasColumn('motorcycle_serial_request_lines', 'source_file_path'))->toBeFalse();
 });
 
-test('a workbook containing multiple products creates an independent workbook for every line', function () {
+test('a workbook containing multiple products creates the corresponding serial lines without generating workbooks', function () {
     Storage::fake('local');
     $user = User::factory()->create([
         'permissions' => [
@@ -270,27 +272,61 @@ test('a workbook containing multiple products creates an independent workbook fo
     $this->actingAs($user);
 
     Livewire::test('motorcycle-serial-request-form')
-        ->set('serialWorkbook', $upload)
+        ->set('serialWorkbooks', [$upload])
         ->call('importSerialWorkbook')
         ->assertHasNoErrors()
         ->assertSet('lines.0.product_id', $firstProduct->id)
         ->assertSet('lines.0.quantity', 2)
         ->assertSet('lines.1.product_id', $secondProduct->id)
         ->assertSet('lines.1.quantity', 2)
-        ->assertSet('lineFiles.0.name', 'Solicitud pendiente - BR 150 BRF - C7.xlsx')
-        ->assertSet('lineFiles.1.name', 'Solicitud pendiente - Modelo Urbano - X2.xlsx')
         ->call('save')
         ->assertHasNoErrors();
 
     $lines = MotorcycleSerialRequest::query()->firstOrFail()->lines()->orderBy('id')->get();
 
-    expect($lines[0]->source_file_path)->not->toBe($lines[1]->source_file_path)
-        ->and($lines[0]->source_file_name)->toBe('Solicitud 1 - BR 150 BRF - C7.xlsx')
-        ->and($lines[1]->source_file_name)->toBe('Solicitud 1 - Modelo Urbano - X2.xlsx')
-        ->and(app(ExtractSerialsFromWorkbook::class)->handle(Storage::disk('local')->path($lines[0]->source_file_path)))
+    expect($lines[0]->serialEntries()->orderBy('id')->pluck('serial')->all())
         ->toBe(['8YZC7MCC9TD033582', 'ABCC7MCC0TD011111'])
-        ->and(app(ExtractSerialsFromWorkbook::class)->handle(Storage::disk('local')->path($lines[1]->source_file_path)))
+        ->and($lines[1]->serialEntries()->orderBy('id')->pluck('serial')->all())
         ->toBe(['8YZX2MCC9TD022222', 'ABCX2MCC0TD044444']);
+    Storage::disk('local')->assertDirectoryEmpty('motorcycle-serial-request-workbooks');
+});
+
+test('multiple workbooks are processed together and grouped into their corresponding product lines', function () {
+    $user = User::factory()->create([
+        'permissions' => [
+            UserPermission::ViewMotorcycleSerialRequests->value,
+            UserPermission::CreateMotorcycleSerialRequests->value,
+        ],
+    ]);
+    $firstProduct = Product::factory()->create(['name' => 'Producto C7', 'niv' => 'C7']);
+    $secondProduct = Product::factory()->create(['name' => 'Producto X2', 'niv' => 'X2']);
+    $firstWorkbookPath = createMotorcycleSerialWorkbook([
+        ['8YZC7MCC9TD033582'],
+        ['8YZC7MCC0TD033583'],
+    ]);
+    $secondWorkbookPath = createMotorcycleSerialWorkbook([
+        ['8YZC7MCC0TD033583'],
+        ['ABCC7MCC1TD033584'],
+        ['8YZX2MCC9TD022222'],
+    ]);
+    $firstUpload = UploadedFile::fake()->createWithContent('Primer archivo.xlsx', file_get_contents($firstWorkbookPath));
+    $secondUpload = UploadedFile::fake()->createWithContent('Segundo archivo.xlsx', file_get_contents($secondWorkbookPath));
+
+    $this->actingAs($user);
+
+    Livewire::test('motorcycle-serial-request-form')
+        ->set('serialWorkbooks', [$firstUpload, $secondUpload])
+        ->assertSee('2 archivo(s) seleccionado(s)')
+        ->assertSee('Primer archivo.xlsx')
+        ->assertSee('Segundo archivo.xlsx')
+        ->call('importSerialWorkbook')
+        ->assertHasNoErrors()
+        ->assertSet('lines.0.product_id', $firstProduct->id)
+        ->assertSet('lines.0.quantity', 3)
+        ->assertSet('lines.1.product_id', $secondProduct->id)
+        ->assertSet('lines.1.quantity', 1)
+        ->assertSet('serialWorkbooks', [])
+        ->assertSet('importMessage', '2 archivo(s) procesado(s): 4 seriales cargados en 2 línea(s) de producto.');
 });
 
 test('the only product line can be removed before saving', function () {
@@ -306,8 +342,7 @@ test('the only product line can be removed before saving', function () {
     Livewire::test('motorcycle-serial-request-form')
         ->assertSee('Quitar línea 1')
         ->call('removeLine', 0)
-        ->assertSet('lines', [])
-        ->assertSet('lineFiles', []);
+        ->assertSet('lines', []);
 });
 
 test('serials are displayed in a modal table for each product line', function () {
@@ -316,6 +351,7 @@ test('serials are displayed in a modal table for each product line', function ()
         'status' => MotorcycleSerialRequestStatus::Draft,
     ]);
     $line = $serialRequest->lines()->firstOrFail();
+    $line->product->update(['name' => 'Producto exportable']);
     $line->serialEntries()->delete();
     $firstSerial = $line->serialEntries()->create(['serial' => '8YZC7MCC9TD033582']);
     $line->serialEntries()->create(['serial' => 'ABCC7MCC0TD011111']);
@@ -330,12 +366,15 @@ test('serials are displayed in a modal table for each product line', function ()
         ->assertSee('Seriales del producto')
         ->assertSee('8YZC7MCC9TD033582')
         ->assertSee('ABCC7MCC0TD011111')
+        ->assertSee('Exportar seriales')
         ->assertSee((string) $firstSerial->id)
         ->assertSee((string) $line->id)
         ->set('serialSearch', '033582')
         ->assertSee('8YZC7MCC9TD033582')
         ->assertDontSee('ABCC7MCC0TD011111')
         ->assertSee('1 registros')
+        ->call('exportModalSerials')
+        ->assertFileDownloaded("Seriales - Solicitud {$serialRequest->id} - Producto exportable.xlsx")
         ->call('closeSerialModal')
         ->assertSet('serialModalLineIndex', null)
         ->assertSet('serialSearch', '');

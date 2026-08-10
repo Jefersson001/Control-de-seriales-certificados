@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\MsCertificado;
+use App\CertificateStatus;
 use App\UserPermission;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Livewire\Attributes\Computed;
@@ -29,6 +30,8 @@ new class extends Component
 
     public string $recordFilter = 'all';
 
+    public string $statusFilter = 'all';
+
     public bool $showDeleteConfirmation = false;
 
     #[Locked]
@@ -36,6 +39,9 @@ new class extends Component
 
     #[Locked]
     public string $deleteRecordFilter = 'all';
+
+    #[Locked]
+    public string $deleteStatusFilter = 'all';
 
     #[Locked]
     public int $deleteCount = 0;
@@ -58,8 +64,16 @@ new class extends Component
 
     public function updatedRecordFilter(): void
     {
-        $this->recordFilter = in_array($this->recordFilter, ['all', 'duplicates', 'invalid_niv_length', 'invalid_records'], true)
+        $this->recordFilter = in_array($this->recordFilter, ['all', 'duplicates', 'unique_niv', 'invalid_niv_length', 'invalid_records', 'group_by_certificate'], true)
             ? $this->recordFilter
+            : 'all';
+        $this->resetPage();
+    }
+
+    public function updatedStatusFilter(): void
+    {
+        $this->statusFilter = CertificateStatus::tryFrom($this->statusFilter) !== null
+            ? $this->statusFilter
             : 'all';
         $this->resetPage();
     }
@@ -105,16 +119,18 @@ new class extends Component
 
         $this->deleteSearch = trim($this->search);
         $this->deleteRecordFilter = $this->recordFilter;
+        $this->deleteStatusFilter = $this->statusFilter;
         $this->deleteCount = MsCertificado::query()
             ->search($this->deleteSearch)
             ->filterByNivStatus($this->deleteRecordFilter)
+            ->filterByCertificateStatus($this->deleteStatusFilter)
             ->count();
         $this->showDeleteConfirmation = true;
     }
 
     public function closeDeleteConfirmation(): void
     {
-        $this->reset(['showDeleteConfirmation', 'deleteSearch', 'deleteRecordFilter', 'deleteCount']);
+        $this->reset(['showDeleteConfirmation', 'deleteSearch', 'deleteRecordFilter', 'deleteStatusFilter', 'deleteCount']);
     }
 
     public function deleteRecords(): void
@@ -124,6 +140,7 @@ new class extends Component
         $deleted = MsCertificado::query()
             ->search($this->deleteSearch)
             ->filterByNivStatus($this->deleteRecordFilter)
+            ->filterByCertificateStatus($this->deleteStatusFilter)
             ->delete();
 
         $this->closeDeleteConfirmation();
@@ -136,7 +153,7 @@ new class extends Component
     #[Computed]
     public function certificates(): LengthAwarePaginator
     {
-        return MsCertificado::query()
+        $query = MsCertificado::query()
             ->select([
                 'id',
                 'no',
@@ -146,12 +163,42 @@ new class extends Component
                 'fabricacion',
                 'anio',
                 'niv',
+                'status',
                 'codigo',
             ])
             ->search($this->search)
             ->filterByNivStatus($this->recordFilter)
-            ->latest('id')
-            ->paginate((int) $this->perPage);
+            ->filterByCertificateStatus($this->statusFilter);
+
+        if ($this->recordFilter === 'group_by_certificate') {
+            return $query
+                ->select('codigo')
+                ->selectRaw('COUNT(*) as aggregate')
+                ->groupBy('codigo')
+                ->orderBy('codigo')
+                ->paginate((int) $this->perPage);
+        }
+
+        return $query->latest('id')->paginate((int) $this->perPage);
+    }
+
+    /** @return array<string, int> */
+    #[Computed]
+    public function certificateGroupCounts(): array
+    {
+        if ($this->recordFilter !== 'group_by_certificate') {
+            return [];
+        }
+
+        return MsCertificado::query()
+            ->search($this->search)
+            ->filterByCertificateStatus($this->statusFilter)
+            ->selectRaw('codigo, COUNT(*) as aggregate')
+            ->groupBy('codigo')
+            ->orderBy('codigo')
+            ->pluck('aggregate', 'codigo')
+            ->map(fn (mixed $count): int => (int) $count)
+            ->all();
     }
 };
 ?>
@@ -284,15 +331,77 @@ new class extends Component
                 >
                     <option value="all">Todos los registros</option>
                     <option value="duplicates">NIV duplicados</option>
+                    <option value="unique_niv">NIV únicos</option>
                     <option value="invalid_niv_length">NIV con longitud inválida</option>
                     <option value="invalid_records">Registros inválidos</option>
+                    <option value="group_by_certificate">Agrupar por No Certificado</option>
                 </select>
             </div>
 
+            <div class="w-full lg:max-w-xs">
+                <label for="certificate-status-filter" class="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    Filtrar por status
+                </label>
+                <select
+                    id="certificate-status-filter"
+                    wire:model.live="statusFilter"
+                    class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-950 outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 dark:border-white/10 dark:bg-slate-950/60 dark:text-white"
+                >
+                    <option value="all">Todos los status</option>
+                    @foreach (CertificateStatus::cases() as $status)
+                        <option value="{{ $status->value }}">{{ $status->label() }}</option>
+                    @endforeach
+                </select>
+            </div>
             <x-per-page-selector id="certificates-per-page" />
         </div>
 
-        <div class="overflow-x-auto">
+        @if ($recordFilter === 'group_by_certificate')
+            <div class="flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-indigo-200 bg-indigo-50 px-5 py-4 text-sm text-indigo-900 dark:border-indigo-500/20 dark:bg-indigo-500/10 dark:text-indigo-200">
+                <span><strong>{{ count($this->certificateGroupCounts) }}</strong> números de certificado</span>
+                <span><strong>{{ array_sum($this->certificateGroupCounts) }}</strong> registros agrupados</span>
+            </div>
+        @endif
+
+        @if ($recordFilter === 'group_by_certificate')
+            <div class="overflow-x-auto">
+                <table class="w-full text-left">
+                    <thead class="bg-slate-50 text-xs uppercase tracking-wider text-slate-500 dark:bg-slate-950/40 dark:text-slate-400">
+                        <tr>
+                            <th class="px-5 py-4 font-semibold">No Certificado</th>
+                            <th class="w-48 px-5 py-4 text-right font-semibold">Cantidad</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100 dark:divide-white/5">
+                        @forelse ($this->certificates as $certificate)
+                            <tr wire:key="certificate-group-{{ $certificate->codigo }}" class="transition hover:bg-indigo-50 dark:hover:bg-indigo-500/10">
+                                <td class="px-5 py-4 font-mono font-semibold text-indigo-700 dark:text-indigo-200">
+                                    {{ $certificate->codigo }}
+                                </td>
+                                <td class="px-5 py-4 text-right">
+                                    <span class="inline-flex min-w-16 justify-center rounded-full bg-indigo-100 px-3 py-1 text-sm font-semibold text-indigo-700 dark:bg-indigo-400/15 dark:text-indigo-200">
+                                        {{ $certificate->aggregate }}
+                                    </span>
+                                </td>
+                            </tr>
+                        @empty
+                            <tr>
+                                <td colspan="2" class="px-6 py-14 text-center">
+                                    <p class="font-semibold">No se encontraron certificados</p>
+                                    <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                                        No existen certificados que coincidan con la búsqueda.
+                                    </p>
+                                </td>
+                            </tr>
+                        @endforelse
+                    </tbody>
+                </table>
+            </div>
+        @else
+        <div
+            class="overflow-x-auto"
+            x-data="{ expandedCertificateGroups: {} }"
+        >
             <table class="w-full min-w-7xl text-left">
                 <thead class="bg-slate-50 text-xs uppercase tracking-wider text-slate-500 dark:bg-slate-950/40 dark:text-slate-400">
                     <tr>
@@ -303,12 +412,49 @@ new class extends Component
                         <th class="px-5 py-4 font-semibold">Fabricación</th>
                         <th class="px-5 py-4 font-semibold">Año</th>
                         <th class="px-5 py-4 font-semibold">NIV</th>
+                        <th class="px-5 py-4 font-semibold">Status</th>
                         <th class="px-5 py-4 font-semibold">No Certificado</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100 dark:divide-white/5">
+                    @php($currentCertificateGroup = null)
                     @forelse ($this->certificates as $certificate)
-                        <tr wire:key="certificate-{{ $certificate->id }}" class="transition hover:bg-slate-50 dark:hover:bg-white/[0.025]">
+                        @if ($recordFilter === 'group_by_certificate' && $currentCertificateGroup !== $certificate->codigo)
+                            @php($currentCertificateGroup = $certificate->codigo)
+                            <tr wire:key="certificate-group-{{ $certificate->id }}" class="bg-indigo-50 dark:bg-indigo-500/10">
+                                <td colspan="9" class="p-0">
+                                    <button
+                                        type="button"
+                                        class="flex w-full items-center gap-2 px-5 py-3 text-left font-semibold text-indigo-800 transition hover:bg-indigo-100 dark:text-indigo-200 dark:hover:bg-indigo-500/15"
+                                        x-on:click="expandedCertificateGroups[@js($certificate->codigo)] = ! expandedCertificateGroups[@js($certificate->codigo)]"
+                                        x-bind:aria-expanded="Boolean(expandedCertificateGroups[@js($certificate->codigo)])"
+                                    >
+                                        <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7h6l2 2h10v10H3V7Z"/></svg>
+                                        <span>No Certificado:</span>
+                                        <span class="font-mono">{{ $certificate->codigo }} ({{ $this->certificateGroupCounts[$certificate->codigo] }})</span>
+                                        <svg
+                                            class="ml-auto size-5 transition-transform"
+                                            x-bind:class="{ 'rotate-180': expandedCertificateGroups[@js($certificate->codigo)] }"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            stroke-width="2"
+                                            aria-hidden="true"
+                                        >
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/>
+                                        </svg>
+                                    </button>
+                                </td>
+                            </tr>
+                        @endif
+                        <tr
+                            wire:key="certificate-{{ $certificate->id }}"
+                            @if ($recordFilter === 'group_by_certificate')
+                                x-show="expandedCertificateGroups[@js($certificate->codigo)]"
+                                x-cloak
+                            @endif
+                            class="transition hover:bg-slate-50 dark:hover:bg-white/[0.025]"
+                        >
                             <td class="whitespace-nowrap px-5 py-4 font-semibold text-indigo-600 dark:text-indigo-300">{{ $certificate->no }}</td>
                             <td class="whitespace-nowrap px-5 py-4">{{ $certificate->marca }}</td>
                             <td class="whitespace-nowrap px-5 py-4">{{ $certificate->modelo }}</td>
@@ -316,11 +462,19 @@ new class extends Component
                             <td class="whitespace-nowrap px-5 py-4">{{ $certificate->fabricacion }}</td>
                             <td class="whitespace-nowrap px-5 py-4">{{ $certificate->anio }}</td>
                             <td class="whitespace-nowrap px-5 py-4 font-mono text-sm text-slate-600 dark:text-slate-300">{{ $certificate->niv }}</td>
+                            <td class="whitespace-nowrap px-5 py-4">
+                                <span @class([
+                                    'inline-flex rounded-full px-3 py-1 text-xs font-semibold',
+                                    'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300' => $certificate->status === CertificateStatus::PendingDispatch,
+                                    'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300' => $certificate->status === CertificateStatus::Dispatched,
+                                    'bg-rose-100 text-rose-800 dark:bg-rose-500/15 dark:text-rose-300' => $certificate->status === CertificateStatus::Returned,
+                                ])>{{ $certificate->status->label() }}</span>
+                            </td>
                             <td class="whitespace-nowrap px-5 py-4 font-mono text-sm text-slate-600 dark:text-slate-300">{{ $certificate->codigo }}</td>
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="8" class="px-6 py-14 text-center">
+                            <td colspan="9" class="px-6 py-14 text-center">
                                 <p class="font-semibold">No se encontraron certificados</p>
                                 <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
                                     No existen registros que coincidan con la búsqueda.
@@ -331,6 +485,7 @@ new class extends Component
                 </tbody>
             </table>
         </div>
+        @endif
 
         @if ($this->certificates->hasPages())
             <div class="border-t border-slate-200 px-6 py-4 dark:border-white/10">

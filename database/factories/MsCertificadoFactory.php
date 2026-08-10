@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\CertificateStatus;
 use App\Models\MsCertificado;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
@@ -25,6 +26,7 @@ class MsCertificadoFactory extends Factory
             'fabricacion' => fake()->randomElement(['Nacional', 'Importado']),
             'anio' => fake()->numberBetween(1990, (int) date('Y')),
             'niv' => fake()->unique()->bothify('?????????########'),
+            'status' => CertificateStatus::PendingDispatch,
             'codigo' => fake()->unique()->bothify('COD-####-????'),
         ];
     }
