@@ -277,6 +277,15 @@ new class extends Component
     <div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <a href="{{ route('dispatches.index') }}" class="font-semibold text-indigo-600 hover:text-indigo-500">← Volver a la lista</a>
         <div class="flex flex-wrap justify-end gap-3">
+            @if ($this->dispatchId !== null && $this->selectedIds !== [] && auth()->user()->hasPermission(UserPermission::ViewDispatches))
+                <a href="{{ route('dispatches.certificates.print', $this->dispatchId) }}" class="inline-flex items-center justify-center gap-2 rounded-xl border border-indigo-200 bg-white px-5 py-3 font-semibold text-indigo-700 transition hover:bg-indigo-50 dark:border-indigo-500/30 dark:bg-transparent dark:text-indigo-300">
+                    <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M6.72 13.83a4.4 4.4 0 0 1-.98-3.08 4.4 4.4 0 0 1 4.65-4.28c1.96.15 3.52 1.5 4.32 3.43.58-1.03 1.62-1.67 2.81-1.7a3.02 3.02 0 0 1 3.02 3.4c-.16 1.42-1.3 2.55-2.72 2.62H7.07a2.44 2.44 0 0 1-.35-3.39Z"/>
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 15.5V21m0 0-3-3m3 3 3-3"/>
+                    </svg>
+                    Imprimir certificados
+                </a>
+            @endif
             @if (! $this->isDone() && auth()->user()->hasPermission($dispatchId === null ? UserPermission::CreateDispatches : UserPermission::EditDispatches))
                 <button wire:click="save" wire:loading.attr="disabled" wire:target="save" type="button" class="rounded-xl border border-indigo-200 bg-white px-5 py-3 font-semibold text-indigo-700 hover:bg-indigo-50 dark:border-indigo-500/30 dark:bg-transparent dark:text-indigo-300">Guardar</button>
                 <button wire:click="openFinalizeConfirmation" type="button" class="rounded-xl bg-emerald-600 px-5 py-3 font-semibold text-white shadow-lg shadow-emerald-500/20 hover:bg-emerald-500">Finalizar</button>

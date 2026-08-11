@@ -4,6 +4,7 @@ use App\Http\Controllers\Auth\AuthenticateUserController;
 use App\Http\Controllers\Auth\LogoutUserController;
 use App\Http\Controllers\CertificateDocumentDownloadController;
 use App\Http\Controllers\CertificateExportController;
+use App\Http\Controllers\DispatchCertificatePrintController;
 use App\Http\Controllers\DispatchController;
 use App\Http\Controllers\MotorcycleSerialRequestController;
 use App\Http\Controllers\ProductController;
@@ -33,6 +34,9 @@ Route::get('/despacho/nuevo', [DispatchController::class, 'create'])
 Route::get('/despacho/{dispatch}', [DispatchController::class, 'edit'])
     ->middleware(['auth', 'password.not_expired', 'permission:dispatches.view'])
     ->name('dispatches.edit');
+Route::get('/despacho/{dispatch}/imprimir-certificados', DispatchCertificatePrintController::class)
+    ->middleware(['auth', 'password.not_expired', 'permission:dispatches.view'])
+    ->name('dispatches.certificates.print');
 Route::get('/devoluciones', [ReturnController::class, 'index'])
     ->middleware(['auth', 'password.not_expired', 'permission:returns.view'])
     ->name('returns.index');

@@ -10,11 +10,14 @@
     "license": "MIT",
     "require": {
         "php": "^8.3",
+        "drainerlight/php-pdf-decompressor": "^0.1.0",
         "laravel/framework": "^13.17",
         "laravel/tinker": "^3.0",
         "livewire/blaze": "^1.0",
         "livewire/livewire": "^4.1",
         "openspout/openspout": "5.8",
+        "setasign/fpdf": "*",
+        "setasign/fpdi": "*",
         "smalot/pdfparser": "^2.12"
     },
     "require-dev": {

@@ -1,7 +1,9 @@
 <?php
 
+use App\Actions\Dispatches\PrintDispatchCertificates;
 use App\CertificateStatus;
 use App\DispatchStatus;
+use App\Models\CertificateDocument;
 use App\Models\Dispatch;
 use App\Models\MsCertificado;
 use App\Models\ProductReturn;
@@ -9,10 +11,91 @@ use App\Models\User;
 use App\ReturnStatus;
 use App\UserPermission;
 use App\UserRole;
-use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
+use PdfDecompressor\Normalizer;
+use setasign\Fpdi\Fpdi;
+use setasign\Fpdi\PdfParser\CrossReference\CrossReferenceException;
+use Smalot\PdfParser\Parser;
 
-uses(RefreshDatabase::class);
+/**
+ * @param  list<string>  $pages
+ */
+function makeCertificatePdf(array $pages): string
+{
+    $pdf = new FPDF;
+
+    foreach ($pages as $page) {
+        $pdf->AddPage();
+        $pdf->SetFont('Helvetica', '', 12);
+        $pdf->Cell(0, 10, $page);
+    }
+
+    return $pdf->Output('S');
+}
+
+/**
+ * @param  list<string>  $pages
+ * @return list<string>
+ */
+function pdfPageTexts(string $content): array
+{
+    $document = (new Parser)->parseContent($content);
+    $texts = [];
+
+    foreach ($document->getPages() as $page) {
+        $texts[] = trim($page->getText());
+    }
+
+    return $texts;
+}
+
+/**
+ * @param  list<string>  $pages
+ */
+function makeCompressedXrefPdf(array $pages): string
+{
+    $count = count($pages);
+    $fontId = 3 + (2 * $count);
+    $pdf = "%PDF-1.5\n%\xE2\xE3\xCF\xD3\n";
+    $offsets = [];
+    $write = function (int $id, string $body) use (&$pdf, &$offsets): void {
+        $offsets[$id] = strlen($pdf);
+        $pdf .= $id.' 0 obj'."\n".$body."\nendobj\n";
+    };
+
+    $write(1, '<< /Type /Catalog /Pages 2 0 R >>');
+
+    $kids = implode(' ', array_map(fn (int $i): string => (3 + $i).' 0 R', range(0, $count - 1)));
+    $write(2, "<< /Type /Pages /Kids [$kids] /Count $count >>");
+
+    for ($i = 0; $i < $count; $i++) {
+        $pageId = 3 + $i;
+        $contentId = 3 + $count + $i;
+        $write($pageId, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents $contentId 0 R /Resources << /Font << /F1 $fontId 0 R >> >> >>");
+    }
+
+    for ($i = 0; $i < $count; $i++) {
+        $contentId = 3 + $count + $i;
+        $stream = 'BT /F1 12 Tf 50 750 Td ('.$pages[$i].') Tj ET'."\n";
+        $compressed = gzcompress($stream, 9);
+        $write($contentId, '<< /Length '.strlen($compressed).' /Filter /FlateDecode >>'."\nstream\n".$compressed."\nendstream");
+    }
+
+    $write($fontId, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+
+    $entries = pack('CNn', 0, 0, 65535);
+
+    for ($id = 1; $id < $fontId; $id++) {
+        $entries .= pack('CNn', 1, $offsets[$id], 0);
+    }
+
+    $compressedEntries = gzcompress($entries, 9);
+    $write($fontId + 1, '<< /Type /XRef /Size '.$fontId.' /Root 1 0 R /W [1 4 2] /Index [0 '.$fontId.'] /Filter /FlateDecode /Length '.strlen($compressedEntries).' >>'."\nstream\n".$compressedEntries."\nendstream");
+    $pdf .= "startxref\n".$offsets[$fontId + 1]."\n%%EOF";
+
+    return $pdf;
+}
 
 test('administrators can access dispatch and return modules', function () {
     $administrator = User::factory()->create(['role' => UserRole::Admin]);
@@ -278,4 +361,224 @@ test('users without delete permission cannot delete dispatches or returns', func
 
     expect(Dispatch::query()->find($dispatch->id))->not->toBeNull()
         ->and(ProductReturn::query()->find($return->id))->not->toBeNull();
+});
+
+test('printing dispatch certificates includes the first page and each serial page', function () {
+    Storage::fake('local');
+    $administrator = User::factory()->create(['role' => UserRole::Admin]);
+    $serialOne = MsCertificado::factory()->create([
+        'niv' => '8YZC7MCC0TD000101',
+        'codigo' => 'DG-NIV-RG5-0175-PC',
+    ]);
+    $serialTwo = MsCertificado::factory()->create([
+        'niv' => '8YZC7MCC0TD000102',
+        'codigo' => 'DG-NIV-RG5-0175-PC',
+    ]);
+    $content = makeCertificatePdf([
+        'PRIMERA PAGINA',
+        'SEGUNDA PAGINA 8YZC7MCC0TD000101',
+        'TERCERA PAGINA 8YZC7MCC0TD000102',
+    ]);
+    Storage::disk('local')->put('certificate-documents/dg-niv-rg5-0175-pc.pdf', $content);
+    CertificateDocument::query()->create([
+        'control_number' => 'DG-NIV-RG5-0175-PC',
+        'file_name' => 'DG-NIV-RG5-0175-PC.pdf',
+        'original_file_name' => 'certificado.pdf',
+        'file_path' => 'certificate-documents/dg-niv-rg5-0175-pc.pdf',
+    ]);
+    $dispatch = Dispatch::query()->create(['name' => 'WH/OUT/00050']);
+    $dispatch->lines()->create(['ms_certificado_id' => $serialOne->id]);
+    $dispatch->lines()->create(['ms_certificado_id' => $serialTwo->id]);
+
+    $this->actingAs($administrator);
+
+    $result = app(PrintDispatchCertificates::class)->handle($dispatch);
+    $texts = pdfPageTexts($result);
+
+    expect($texts)->toHaveCount(3)
+        ->and($texts[0])->toContain('PRIMERA PAGINA')
+        ->and($texts[1])->toContain('SEGUNDA PAGINA')
+        ->and($texts[2])->toContain('TERCERA PAGINA');
+});
+
+test('printing dispatch certificates groups serials per certificate without repeating pages', function () {
+    Storage::fake('local');
+    $administrator = User::factory()->create(['role' => UserRole::Admin]);
+    $serialOne = MsCertificado::factory()->create([
+        'niv' => '8YZC7MCC0TD000201',
+        'codigo' => 'DG-NIV-RG5-0175-PC',
+    ]);
+    $serialTwo = MsCertificado::factory()->create([
+        'niv' => '8YZC7MCC0TD000202',
+        'codigo' => 'DG-NIV-RG5-0175-PC',
+    ]);
+    $content = makeCertificatePdf([
+        'PRIMERA PAGINA',
+        'PAGINA CON DOS SERIALES 8YZC7MCC0TD000201 8YZC7MCC0TD000202',
+    ]);
+    Storage::disk('local')->put('certificate-documents/dg-niv-rg5-0175-pc.pdf', $content);
+    CertificateDocument::query()->create([
+        'control_number' => 'DG-NIV-RG5-0175-PC',
+        'file_name' => 'DG-NIV-RG5-0175-PC.pdf',
+        'original_file_name' => 'certificado.pdf',
+        'file_path' => 'certificate-documents/dg-niv-rg5-0175-pc.pdf',
+    ]);
+    $dispatch = Dispatch::query()->create(['name' => 'WH/OUT/00051']);
+    $dispatch->lines()->create(['ms_certificado_id' => $serialOne->id]);
+    $dispatch->lines()->create(['ms_certificado_id' => $serialTwo->id]);
+
+    $this->actingAs($administrator);
+
+    $result = app(PrintDispatchCertificates::class)->handle($dispatch);
+    $texts = pdfPageTexts($result);
+
+    expect($texts)->toHaveCount(2)
+        ->and($texts[0])->toContain('PRIMERA PAGINA')
+        ->and($texts[1])->toContain('PAGINA CON DOS SERIALES');
+});
+
+test('printing dispatch certificates concatenates different certificates in order', function () {
+    Storage::fake('local');
+    $administrator = User::factory()->create(['role' => UserRole::Admin]);
+    $serialOne = MsCertificado::factory()->create([
+        'niv' => '8YZC7MCC0TD000301',
+        'codigo' => 'DG-NIV-RG5-0175-PC',
+    ]);
+    $serialTwo = MsCertificado::factory()->create([
+        'niv' => '8YZC7MCC0TD000302',
+        'codigo' => 'DG-NIV-RG8-0005-PC',
+    ]);
+    $firstContent = makeCertificatePdf(['PRIMER CERTIFICADO PAG 1', 'PRIMER CERTIFICADO SERIAL 8YZC7MCC0TD000301']);
+    $secondContent = makeCertificatePdf(['SEGUNDO CERTIFICADO PAG 1', 'SEGUNDO CERTIFICADO SERIAL 8YZC7MCC0TD000302']);
+    Storage::disk('local')->put('certificate-documents/dg-niv-rg5-0175-pc.pdf', $firstContent);
+    Storage::disk('local')->put('certificate-documents/dg-niv-rg8-0005-pc.pdf', $secondContent);
+    CertificateDocument::query()->create([
+        'control_number' => 'DG-NIV-RG5-0175-PC',
+        'file_name' => 'DG-NIV-RG5-0175-PC.pdf',
+        'original_file_name' => 'primero.pdf',
+        'file_path' => 'certificate-documents/dg-niv-rg5-0175-pc.pdf',
+    ]);
+    CertificateDocument::query()->create([
+        'control_number' => 'DG-NIV-RG8-0005-PC',
+        'file_name' => 'DG-NIV-RG8-0005-PC.pdf',
+        'original_file_name' => 'segundo.pdf',
+        'file_path' => 'certificate-documents/dg-niv-rg8-0005-pc.pdf',
+    ]);
+    $dispatch = Dispatch::query()->create(['name' => 'WH/OUT/00052']);
+    $dispatch->lines()->create(['ms_certificado_id' => $serialOne->id]);
+    $dispatch->lines()->create(['ms_certificado_id' => $serialTwo->id]);
+
+    $this->actingAs($administrator);
+
+    $result = app(PrintDispatchCertificates::class)->handle($dispatch);
+    $texts = pdfPageTexts($result);
+
+    expect($texts)->toHaveCount(4)
+        ->and($texts[0])->toContain('PRIMER CERTIFICADO PAG 1')
+        ->and($texts[1])->toContain('PRIMER CERTIFICADO SERIAL')
+        ->and($texts[2])->toContain('SEGUNDO CERTIFICADO PAG 1')
+        ->and($texts[3])->toContain('SEGUNDO CERTIFICADO SERIAL');
+});
+
+test('printing dispatch certificates normalizes certificates with a compressed xref stream', function () {
+    Storage::fake('local');
+    $administrator = User::factory()->create(['role' => UserRole::Admin]);
+    $serial = MsCertificado::factory()->create([
+        'niv' => '8YZC7MCC0TD000701',
+        'codigo' => 'DG-NIV-RG5-0175-PC',
+    ]);
+    $content = makeCompressedXrefPdf([
+        'PRIMERA PAGINA COMPRIMIDA',
+        'SEGUNDA PAGINA COMPRIMIDA 8YZC7MCC0TD000701',
+    ]);
+
+    expect(Normalizer::isCompressed($content))->toBeTrue();
+
+    $rawFile = tempnam(sys_get_temp_dir(), 'compressed_xref_');
+    file_put_contents($rawFile, $content);
+
+    expect(fn () => (new Fpdi)->setSourceFile($rawFile))
+        ->toThrow(CrossReferenceException::class);
+
+    Storage::disk('local')->put('certificate-documents/dg-niv-rg5-0175-pc.pdf', $content);
+    CertificateDocument::query()->create([
+        'control_number' => 'DG-NIV-RG5-0175-PC',
+        'file_name' => 'DG-NIV-RG5-0175-PC.pdf',
+        'original_file_name' => 'certificado.pdf',
+        'file_path' => 'certificate-documents/dg-niv-rg5-0175-pc.pdf',
+    ]);
+    $dispatch = Dispatch::query()->create(['name' => 'WH/OUT/00056']);
+    $dispatch->lines()->create(['ms_certificado_id' => $serial->id]);
+
+    $this->actingAs($administrator);
+
+    $result = app(PrintDispatchCertificates::class)->handle($dispatch);
+    $texts = pdfPageTexts($result);
+
+    expect($texts)->toHaveCount(2)
+        ->and($texts[0])->toContain('PRIMERA PAGINA COMPRIMIDA')
+        ->and($texts[1])->toContain('SEGUNDA PAGINA COMPRIMIDA');
+});
+
+test('printing dispatch certificates throws when the certificate document is missing', function () {
+    Storage::fake('local');
+    $administrator = User::factory()->create(['role' => UserRole::Admin]);
+    $serial = MsCertificado::factory()->create([
+        'niv' => '8YZC7MCC0TD000401',
+        'codigo' => 'DG-NIV-RG5-0175-PC',
+    ]);
+    $dispatch = Dispatch::query()->create(['name' => 'WH/OUT/00053']);
+    $dispatch->lines()->create(['ms_certificado_id' => $serial->id]);
+
+    $this->actingAs($administrator);
+
+    expect(fn () => app(PrintDispatchCertificates::class)->handle($dispatch))
+        ->toThrow(RuntimeException::class, 'No se encontró el certificado DG-NIV-RG5-0175-PC');
+});
+
+test('the certificates print route requires permission and downloads the combined pdf', function () {
+    Storage::fake('local');
+    $administrator = User::factory()->create(['role' => UserRole::Admin]);
+    $unauthorized = User::factory()->create();
+    $serial = MsCertificado::factory()->create([
+        'niv' => '8YZC7MCC0TD000501',
+        'codigo' => 'DG-NIV-RG5-0175-PC',
+    ]);
+    $content = makeCertificatePdf(['PRIMERA PAGINA', 'SERIAL 8YZC7MCC0TD000501']);
+    Storage::disk('local')->put('certificate-documents/dg-niv-rg5-0175-pc.pdf', $content);
+    CertificateDocument::query()->create([
+        'control_number' => 'DG-NIV-RG5-0175-PC',
+        'file_name' => 'DG-NIV-RG5-0175-PC.pdf',
+        'original_file_name' => 'certificado.pdf',
+        'file_path' => 'certificate-documents/dg-niv-rg5-0175-pc.pdf',
+    ]);
+    $dispatch = Dispatch::query()->create(['name' => 'WH/OUT/00054']);
+    $dispatch->lines()->create(['ms_certificado_id' => $serial->id]);
+
+    $this->actingAs($unauthorized)
+        ->get(route('dispatches.certificates.print', $dispatch))
+        ->assertForbidden();
+
+    $this->actingAs($administrator)
+        ->get(route('dispatches.certificates.print', $dispatch))
+        ->assertSuccessful()
+        ->assertDownload('certificados-whout00054.pdf');
+});
+
+test('the dispatch form shows the print certificates button for saved dispatches with serials', function () {
+    $administrator = User::factory()->create(['role' => UserRole::Admin]);
+    $serial = MsCertificado::factory()->create([
+        'niv' => '8YZC7MCC0TD000601',
+        'codigo' => 'DG-NIV-RG5-0175-PC',
+    ]);
+    $dispatch = Dispatch::query()->create(['name' => 'WH/OUT/00055']);
+    $dispatch->lines()->create(['ms_certificado_id' => $serial->id]);
+
+    $this->actingAs($administrator);
+
+    Livewire::test('dispatch-form', ['dispatchId' => $dispatch->id])
+        ->assertSee('Imprimir certificados');
+
+    Livewire::test('dispatch-form')
+        ->assertDontSee('Imprimir certificados');
 });
