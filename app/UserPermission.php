@@ -29,7 +29,9 @@ enum UserPermission: string
     case ViewDispatches = 'dispatches.view';
     case CreateDispatches = 'dispatches.create';
     case EditDispatches = 'dispatches.edit';
+    case DeleteDispatches = 'dispatches.delete';
     case ViewReturns = 'returns.view';
+    case DeleteReturns = 'returns.delete';
     case ViewCertificateDocuments = 'certificate-documents.view';
     case DeleteCertificateDocuments = 'certificate-documents.delete';
 
@@ -61,7 +63,9 @@ enum UserPermission: string
             self::ViewDispatches => 'Consultar Despacho',
             self::CreateDispatches => 'Crear despachos',
             self::EditDispatches => 'Editar y finalizar despachos',
+            self::DeleteDispatches => 'Eliminar despachos',
             self::ViewReturns => 'Consultar Devoluciones',
+            self::DeleteReturns => 'Eliminar devoluciones',
             self::ViewCertificateDocuments => 'Consultar certificados PDF',
             self::DeleteCertificateDocuments => 'Eliminar certificados PDF',
         };

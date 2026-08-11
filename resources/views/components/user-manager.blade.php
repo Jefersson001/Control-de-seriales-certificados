@@ -345,6 +345,16 @@ new class extends Component
             $validated['permissions'] = array_values(array_unique($validated['permissions']));
         }
 
+        if (in_array(UserPermission::DeleteDispatches->value, $validated['permissions'], true)) {
+            $validated['permissions'][] = UserPermission::ViewDispatches->value;
+            $validated['permissions'] = array_values(array_unique($validated['permissions']));
+        }
+
+        if (in_array(UserPermission::DeleteReturns->value, $validated['permissions'], true)) {
+            $validated['permissions'][] = UserPermission::ViewReturns->value;
+            $validated['permissions'] = array_values(array_unique($validated['permissions']));
+        }
+
         if (in_array(UserPermission::EditSystemSettings->value, $validated['permissions'], true)) {
             $validated['permissions'][] = UserPermission::ViewSystemSettings->value;
             $validated['permissions'] = array_values(array_unique($validated['permissions']));
@@ -774,6 +784,9 @@ new class extends Component
                                             <span class="block text-sm font-semibold text-slate-800 dark:text-slate-100">{{ $permission->label() }}</span>
                                             @if (in_array($permission, [UserPermission::ImportCertificates, UserPermission::DeleteCertificates], true))
                                                 <span class="mt-1 block text-xs text-slate-500 dark:text-slate-400">Al habilitarlo también se concede acceso al maestro.</span>
+                                            @endif
+                                            @if (in_array($permission, [UserPermission::DeleteDispatches, UserPermission::DeleteReturns], true))
+                                                <span class="mt-1 block text-xs text-slate-500 dark:text-slate-400">Al habilitarlo también se concede acceso al módulo.</span>
                                             @endif
                                         </span>
                                     </label>

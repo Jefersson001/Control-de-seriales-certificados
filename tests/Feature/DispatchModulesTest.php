@@ -218,3 +218,64 @@ test('a completed dispatch cannot be modified', function () {
         ->call('removeCertificate', $record->id)
         ->assertForbidden();
 });
+
+test('deleting a dispatch removes it with its lines', function () {
+    $administrator = User::factory()->create(['role' => UserRole::Admin]);
+    $dispatch = Dispatch::query()->create([
+        'name' => 'WH/OUT/00047',
+        'created_by' => $administrator->id,
+    ]);
+    $dispatch->lines()->create(['ms_certificado_id' => MsCertificado::factory()->create()->id]);
+
+    $this->actingAs($administrator);
+
+    Livewire::test('dispatch-list')
+        ->call('openDeleteConfirmation', $dispatch->id)
+        ->assertSet('showDeleteConfirmation', true)
+        ->call('deleteDispatch')
+        ->assertSet('showDeleteConfirmation', false);
+
+    expect(Dispatch::query()->find($dispatch->id))->toBeNull()
+        ->and($dispatch->lines()->count())->toBe(0);
+});
+
+test('deleting a return removes it with its lines', function () {
+    $administrator = User::factory()->create(['role' => UserRole::Admin]);
+    $return = ProductReturn::query()->create([
+        'name' => 'RET-0002',
+        'created_by' => $administrator->id,
+    ]);
+    $return->lines()->create(['ms_certificado_id' => MsCertificado::factory()->create()->id]);
+
+    $this->actingAs($administrator);
+
+    Livewire::test('return-list')
+        ->call('openDeleteConfirmation', $return->id)
+        ->assertSet('showDeleteConfirmation', true)
+        ->call('deleteReturn')
+        ->assertSet('showDeleteConfirmation', false);
+
+    expect(ProductReturn::query()->find($return->id))->toBeNull()
+        ->and($return->lines()->count())->toBe(0);
+});
+
+test('users without delete permission cannot delete dispatches or returns', function () {
+    $viewer = User::factory()->create([
+        'permissions' => [UserPermission::ViewDispatches->value, UserPermission::ViewReturns->value],
+    ]);
+    $dispatch = Dispatch::query()->create(['name' => 'WH/OUT/00048']);
+    $return = ProductReturn::query()->create(['name' => 'RET-0003']);
+
+    $this->actingAs($viewer);
+
+    Livewire::test('dispatch-list')
+        ->call('openDeleteConfirmation', $dispatch->id)
+        ->assertForbidden();
+
+    Livewire::test('return-list')
+        ->call('openDeleteConfirmation', $return->id)
+        ->assertForbidden();
+
+    expect(Dispatch::query()->find($dispatch->id))->not->toBeNull()
+        ->and(ProductReturn::query()->find($return->id))->not->toBeNull();
+});
