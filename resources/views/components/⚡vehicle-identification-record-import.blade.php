@@ -1,6 +1,7 @@
 <?php
 
 use App\Actions\Certificates\ImportCertificatesFromPdf;
+use App\Actions\Certificates\StoreCertificateDocument;
 use App\UserPermission;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
@@ -83,7 +84,10 @@ new class extends Component
         $this->showPreview = true;
     }
 
-    public function confirmImport(ImportCertificatesFromPdf $pdfImporter): void
+    public function confirmImport(
+        ImportCertificatesFromPdf $pdfImporter,
+        StoreCertificateDocument $storeCertificateDocument,
+    ): void
     {
         $this->authorizeAccess();
 
@@ -114,6 +118,7 @@ new class extends Component
             $this->includeDuplicates,
             $this->includeInvalid,
         );
+        $storeCertificateDocument->handle($this->pdfFile, $analysis['controlNumber']);
 
         $this->reset(['pdfFile']);
         $this->resetPreview();

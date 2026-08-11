@@ -6,6 +6,7 @@ use App\Actions\VehicleIdentificationRecords\ImportManagementCertificateAnalysis
 use App\Actions\VehicleIdentificationRecords\HydrateManagementCertificateSourceData;
 use App\Actions\VehicleIdentificationRecords\CompareRequestSerialsWithPdf;
 use App\Models\MsCertificado;
+use App\Models\CertificateDocument;
 use App\Models\MotorcycleSerialRequest;
 use App\Models\User;
 use App\Models\VehicleIdentificationRecordCertificateSerial;
@@ -427,6 +428,7 @@ test('certificates are accumulated through independent requests', function () {
 });
 
 test('certificate analysis exports and imports only selectable categories', function () {
+    Storage::fake('local');
     $administrator = User::factory()->create(['role' => UserRole::Admin]);
     $management = VehicleIdentificationRecordManagement::factory()->create();
     $certificate = $management->certificates()->create([
@@ -438,6 +440,7 @@ test('certificate analysis exports and imports only selectable categories', func
         'invalid_count' => 1,
         'analyzed_at' => now(),
     ]);
+    Storage::disk('local')->put($certificate->file_path, '%PDF-1.4 certificado');
     $validSource = [
         'no' => '1',
         'marca' => 'BERA',
@@ -509,7 +512,9 @@ test('certificate analysis exports and imports only selectable categories', func
 
     expect(MsCertificado::query()->count())->toBe(4)
         ->and(MsCertificado::query()->where('niv', '8YZC7MCC0TD999999')->exists())->toBeFalse()
-        ->and($management->refresh()->status)->toBe(VehicleIdentificationRecordManagementStatus::Done);
+        ->and($management->refresh()->status)->toBe(VehicleIdentificationRecordManagementStatus::Done)
+        ->and(CertificateDocument::query()->count())->toBe(1)
+        ->and(CertificateDocument::query()->sole()->managements()->whereKey($management->id)->exists())->toBeTrue();
 
     $export = app(ExportManagementCertificateAnalysis::class)->handle($management, 'certified');
 
@@ -519,7 +524,8 @@ test('certificate analysis exports and imports only selectable categories', func
     $secondImport = app(ImportManagementCertificateAnalysis::class)->handle($management, true, true, true);
 
     expect($secondImport['imported'])->toBe(0)
-        ->and(MsCertificado::query()->count())->toBe(4);
+        ->and(MsCertificado::query()->count())->toBe(4)
+        ->and(CertificateDocument::query()->count())->toBe(1);
 });
 
 test('legacy certificate source data is recovered from its stored pdf', function () {

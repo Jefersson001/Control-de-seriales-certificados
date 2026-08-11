@@ -2,6 +2,7 @@
 
 namespace App\Actions\VehicleIdentificationRecords;
 
+use App\Actions\Certificates\StoreCertificateDocument;
 use App\Models\MsCertificado;
 use App\Models\VehicleIdentificationRecordCertificateSerial;
 use App\Models\VehicleIdentificationRecordManagement;
@@ -9,11 +10,15 @@ use App\VehicleIdentificationRecordCertificateSerialClassification;
 use App\VehicleIdentificationRecordManagementStatus;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 class ImportManagementCertificateAnalysis
 {
-    public function __construct(private HydrateManagementCertificateSourceData $sourceDataHydrator) {}
+    public function __construct(
+        private HydrateManagementCertificateSourceData $sourceDataHydrator,
+        private StoreCertificateDocument $certificateDocumentStore,
+    ) {}
 
     /** @return array{imported: int, certified: int, duplicates: int, invalid: int, skipped: int} */
     public function handle(
@@ -120,8 +125,28 @@ class ImportManagementCertificateAnalysis
                     'status' => VehicleIdentificationRecordManagementStatus::Done,
                 ]);
 
+                $storedCertificateDocuments = 0;
+
+                foreach ($management->certificates()->orderBy('id')->get() as $certificate) {
+                    if (! Storage::disk('local')->exists($certificate->file_path)) {
+                        continue;
+                    }
+
+                    $document = $this->certificateDocumentStore->handleStoredFile(
+                        $certificate->file_path,
+                        $certificate->original_file_name,
+                        $certificate->control_number,
+                        $management->id,
+                    );
+
+                    if ($document->wasRecentlyCreated) {
+                        $storedCertificateDocuments++;
+                    }
+                }
+
                 return [
                     'imported' => count($rows),
+                    'certificate_documents' => $storedCertificateDocuments,
                     ...$counts,
                 ];
             }),

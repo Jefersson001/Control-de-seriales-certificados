@@ -2,7 +2,9 @@
 
 use App\Http\Controllers\Auth\AuthenticateUserController;
 use App\Http\Controllers\Auth\LogoutUserController;
+use App\Http\Controllers\CertificateDocumentDownloadController;
 use App\Http\Controllers\CertificateExportController;
+use App\Http\Controllers\DispatchController;
 use App\Http\Controllers\MotorcycleSerialRequestController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\ProductExportController;
@@ -21,9 +23,15 @@ Route::view('/dashboard', 'dashboard')
 Route::view('/parametros-del-sistema', 'system-settings.index')
     ->middleware(['auth', 'password.not_expired', 'permission:system-settings.view'])
     ->name('system_settings.index');
-Route::view('/despacho', 'dispatches.index')
+Route::get('/despacho', [DispatchController::class, 'index'])
     ->middleware(['auth', 'password.not_expired', 'permission:dispatches.view'])
     ->name('dispatches.index');
+Route::get('/despacho/nuevo', [DispatchController::class, 'create'])
+    ->middleware(['auth', 'password.not_expired', 'permission:dispatches.create'])
+    ->name('dispatches.create');
+Route::get('/despacho/{dispatch}', [DispatchController::class, 'edit'])
+    ->middleware(['auth', 'password.not_expired', 'permission:dispatches.view'])
+    ->name('dispatches.edit');
 Route::view('/devoluciones', 'returns.index')
     ->middleware(['auth', 'password.not_expired', 'permission:returns.view'])
     ->name('returns.index');
@@ -33,6 +41,12 @@ Route::view('/maestro-seriales-certificados', 'certificates.index')
 Route::get('/maestro-seriales-certificados/exportar', CertificateExportController::class)
     ->middleware(['auth', 'password.not_expired', 'permission:certificates.view'])
     ->name('certificates.export');
+Route::view('/certificados', 'certificate-documents.index')
+    ->middleware(['auth', 'password.not_expired', 'permission:certificate-documents.view'])
+    ->name('certificate_documents.index');
+Route::get('/certificados/{certificateDocument}/descargar', CertificateDocumentDownloadController::class)
+    ->middleware(['auth', 'password.not_expired', 'permission:certificate-documents.view'])
+    ->name('certificate_documents.download');
 Route::view('/correccion-maestro-seriales-certificados', 'certificate-corrections.index')
     ->middleware(['auth', 'password.not_expired', 'permission:certificate-corrections.view'])
     ->name('certificate_corrections.index');

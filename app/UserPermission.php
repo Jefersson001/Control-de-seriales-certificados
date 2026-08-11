@@ -27,7 +27,11 @@ enum UserPermission: string
     case ViewSystemSettings = 'system-settings.view';
     case EditSystemSettings = 'system-settings.edit';
     case ViewDispatches = 'dispatches.view';
+    case CreateDispatches = 'dispatches.create';
+    case EditDispatches = 'dispatches.edit';
     case ViewReturns = 'returns.view';
+    case ViewCertificateDocuments = 'certificate-documents.view';
+    case DeleteCertificateDocuments = 'certificate-documents.delete';
 
     public function label(): string
     {
@@ -55,7 +59,11 @@ enum UserPermission: string
             self::ViewSystemSettings => 'Consultar parámetros del sistema',
             self::EditSystemSettings => 'Editar parámetros del sistema',
             self::ViewDispatches => 'Consultar Despacho',
+            self::CreateDispatches => 'Crear despachos',
+            self::EditDispatches => 'Editar y finalizar despachos',
             self::ViewReturns => 'Consultar Devoluciones',
+            self::ViewCertificateDocuments => 'Consultar certificados PDF',
+            self::DeleteCertificateDocuments => 'Eliminar certificados PDF',
         };
     }
 }

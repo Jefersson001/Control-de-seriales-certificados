@@ -37,21 +37,83 @@
                 </p>
 
                 <nav data-sidebar-menu class="mt-4 flex flex-col gap-2 pr-1" aria-label="Navegación del sistema">
-                    @if (auth()->user()->hasPermission(App\UserPermission::ViewCertificates))
+                    @if (auth()->user()->hasPermission(App\UserPermission::ViewVehicleIdentificationRecord))
                         <a
-                            href="{{ route('certificates.index') }}"
+                            href="{{ route('vehicle_identification_records.index') }}"
                             @class([
-                                'flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition',
-                                'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300' => request()->routeIs('certificates.*'),
-                                'text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-white' => ! request()->routeIs('certificates.*'),
+                                'flex items-start gap-3 rounded-xl px-4 py-3 text-sm font-medium transition',
+                                'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300' => request()->routeIs('vehicle_identification_records.*'),
+                                'text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-white' => ! request()->routeIs('vehicle_identification_records.*'),
                             ])
                         >
-                            <svg class="size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M12 3l1.758 1.758 2.485-.243.243 2.485L18.243 8.75 16.485 10.5l-.243 2.485-2.485-.243-.243-2.485L12 14.5l-1.758-1.758-2.485.243-.243-2.485L5.757 8.75 7.515 7l.243-2.485 2.485.243L12 3Z"/>
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 13.75 7.5 21l4.5-2.25L16.5 21l-.75-7.25"/>
+                            <svg class="mt-0.5 size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 3.75h9A2.25 2.25 0 0 1 18.75 6v12A2.25 2.25 0 0 1 16.5 20.25h-9A2.25 2.25 0 0 1 5.25 18V6A2.25 2.25 0 0 1 7.5 3.75Z"/>
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 8.25h7.5M8.25 12h7.5m-7.5 3.75h4.5"/>
                             </svg>
-                            <span>Maestro Seriales Certificados</span>
+                            <span class="leading-5">Constancia de Registro de Número de Identificación de Vehículo</span>
                         </a>
+                    @endif
+
+                    @if (
+                        auth()->user()->hasPermission(App\UserPermission::ViewCertificates)
+                        || auth()->user()->hasPermission(App\UserPermission::ViewCertificateDocuments)
+                    )
+                        <details
+                            data-certificate-master-menu
+                            class="group"
+                            @if (request()->routeIs('certificates.*', 'certificate_documents.*')) open @endif
+                        >
+                            <summary
+                                @class([
+                                    'flex cursor-pointer list-none items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition [&::-webkit-details-marker]:hidden',
+                                    'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300' => request()->routeIs('certificates.*', 'certificate_documents.*'),
+                                    'text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-white' => ! request()->routeIs('certificates.*', 'certificate_documents.*'),
+                                ])
+                            >
+                                <svg class="size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M12 3l1.758 1.758 2.485-.243.243 2.485L18.243 8.75 16.485 10.5l-.243 2.485-2.485-.243-.243-2.485L12 14.5l-1.758-1.758-2.485.243-.243-2.485L5.757 8.75 7.515 7l.243-2.485 2.485.243L12 3Z"/>
+                                </svg>
+                                <span class="grow">Maestro de Seriales</span>
+                                <svg class="size-4 shrink-0 transition-transform duration-200 group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/>
+                                </svg>
+                            </summary>
+
+                            <div class="ml-6 mt-2 flex flex-col gap-1 border-l border-slate-200 pl-3 dark:border-white/10">
+                                @if (auth()->user()->hasPermission(App\UserPermission::ViewCertificates))
+                                    <a
+                                        href="{{ route('certificates.index') }}"
+                                        @class([
+                                            'flex items-center gap-3 rounded-xl px-4 py-2.5 text-sm font-medium transition',
+                                            'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300' => request()->routeIs('certificates.*'),
+                                            'text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-white' => ! request()->routeIs('certificates.*'),
+                                        ])
+                                    >
+                                        <svg class="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 6h15M4.5 12h15M4.5 18h15"/>
+                                        </svg>
+                                        Maestro Seriales Certificados
+                                    </a>
+                                @endif
+
+                                @if (auth()->user()->hasPermission(App\UserPermission::ViewCertificateDocuments))
+                                    <a
+                                        href="{{ route('certificate_documents.index') }}"
+                                        @class([
+                                            'flex items-center gap-3 rounded-xl px-4 py-2.5 text-sm font-medium transition',
+                                            'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300' => request()->routeIs('certificate_documents.*'),
+                                            'text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-white' => ! request()->routeIs('certificate_documents.*'),
+                                        ])
+                                    >
+                                        <svg class="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M6 3.75h8.25L18 7.5v12.75H6V3.75Z"/>
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M14.25 3.75V7.5H18M9 12h6m-6 3h6"/>
+                                        </svg>
+                                        Certificados
+                                    </a>
+                                @endif
+                            </div>
+                        </details>
                     @endif
 
                     @if (
@@ -261,23 +323,6 @@
                                 @endif
                             </div>
                         </details>
-                    @endif
-
-                    @if (auth()->user()->hasPermission(App\UserPermission::ViewVehicleIdentificationRecord))
-                        <a
-                            href="{{ route('vehicle_identification_records.index') }}"
-                            @class([
-                                'flex items-start gap-3 rounded-xl px-4 py-3 text-sm font-medium transition',
-                                'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300' => request()->routeIs('vehicle_identification_records.*'),
-                                'text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-white' => ! request()->routeIs('vehicle_identification_records.*'),
-                            ])
-                        >
-                            <svg class="mt-0.5 size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 3.75h9A2.25 2.25 0 0 1 18.75 6v12A2.25 2.25 0 0 1 16.5 20.25h-9A2.25 2.25 0 0 1 5.25 18V6A2.25 2.25 0 0 1 7.5 3.75Z"/>
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 8.25h7.5M8.25 12h7.5m-7.5 3.75h4.5"/>
-                            </svg>
-                            <span class="leading-5">Constancia de Registro de Número de Identificación de Vehículo</span>
-                        </a>
                     @endif
 
                 </nav>

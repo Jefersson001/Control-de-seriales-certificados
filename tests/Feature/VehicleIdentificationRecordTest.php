@@ -19,6 +19,20 @@ test('administrators can access the vehicle identification record module', funct
         ->assertSee('Seleccionar PDF');
 });
 
+test('vehicle identification record is displayed before the serial master menu', function () {
+    $administrator = User::factory()->create([
+        'role' => UserRole::Admin,
+    ]);
+
+    $this->actingAs($administrator)
+        ->get(route('dashboard'))
+        ->assertSuccessful()
+        ->assertSeeInOrder([
+            route('vehicle_identification_records.index'),
+            'data-certificate-master-menu',
+        ], false);
+});
+
 test('authorized users can see and access the vehicle identification record menu', function () {
     $user = User::factory()->create([
         'permissions' => [UserPermission::ViewVehicleIdentificationRecord->value],
