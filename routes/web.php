@@ -8,6 +8,7 @@ use App\Http\Controllers\DispatchController;
 use App\Http\Controllers\MotorcycleSerialRequestController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\ProductExportController;
+use App\Http\Controllers\ReturnController;
 use App\Http\Controllers\UserManagementController;
 use App\Http\Controllers\VehicleIdentificationRecordManagementController;
 use Illuminate\Support\Facades\Route;
@@ -32,9 +33,15 @@ Route::get('/despacho/nuevo', [DispatchController::class, 'create'])
 Route::get('/despacho/{dispatch}', [DispatchController::class, 'edit'])
     ->middleware(['auth', 'password.not_expired', 'permission:dispatches.view'])
     ->name('dispatches.edit');
-Route::view('/devoluciones', 'returns.index')
+Route::get('/devoluciones', [ReturnController::class, 'index'])
     ->middleware(['auth', 'password.not_expired', 'permission:returns.view'])
     ->name('returns.index');
+Route::get('/devoluciones/nueva', [ReturnController::class, 'create'])
+    ->middleware(['auth', 'password.not_expired', 'permission:returns.view'])
+    ->name('returns.create');
+Route::get('/devoluciones/{return}', [ReturnController::class, 'edit'])
+    ->middleware(['auth', 'password.not_expired', 'permission:returns.view'])
+    ->name('returns.edit');
 Route::view('/maestro-seriales-certificados', 'certificates.index')
     ->middleware(['auth', 'password.not_expired', 'permission:certificates.view'])
     ->name('certificates.index');
