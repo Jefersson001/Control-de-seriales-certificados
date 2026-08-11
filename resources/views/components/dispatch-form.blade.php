@@ -290,19 +290,25 @@ new class extends Component
     <div class="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
         <div class="border-b border-slate-200 bg-slate-50/70 p-6 dark:border-white/10 dark:bg-slate-950/30 sm:p-8">
             <p class="mb-4 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">Estado del despacho</p>
-            <div class="grid grid-cols-2 overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-white/10 dark:bg-slate-900">
-                @foreach ([DispatchStatus::Draft, DispatchStatus::Done] as $availableStatus)
+            <div class="grid grid-cols-3 overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-white/10 dark:bg-slate-900">
+                @foreach ([DispatchStatus::Draft, DispatchStatus::InProgress, DispatchStatus::Done] as $availableStatus)
                     <button
                         wire:key="dispatch-status-{{ $availableStatus->value }}"
+                        @if ($availableStatus !== DispatchStatus::Done)
+                            wire:click="setStatus('{{ $availableStatus->value }}')"
+                        @else
+                            title="El estado Hecho solo se asigna mediante la acción de finalizar"
+                        @endif
                         type="button"
-                        disabled
-                        title="{{ $availableStatus === DispatchStatus::Done ? 'El estado Hecho solo se asigna mediante el botón Finalizar' : 'El estado se controla automáticamente' }}"
+                        @disabled($this->isDone() || $availableStatus === DispatchStatus::Done)
                         @class([
-                            'relative cursor-not-allowed px-3 py-3 text-sm font-semibold transition sm:px-5',
+                            'relative px-3 py-3 text-sm font-semibold transition sm:px-5',
                             'border-l border-slate-200 dark:border-white/10' => ! $loop->first,
-                            'bg-slate-700 text-white dark:bg-slate-600' => ! $this->isDone() && $availableStatus === DispatchStatus::Draft,
-                            'bg-emerald-600 text-white' => $this->isDone() && $availableStatus === DispatchStatus::Done,
-                            'text-slate-400 dark:text-slate-500' => ($this->isDone() && $availableStatus === DispatchStatus::Draft) || (! $this->isDone() && $availableStatus === DispatchStatus::Done),
+                            'bg-slate-700 text-white dark:bg-slate-600' => $status === $availableStatus->value && $availableStatus === DispatchStatus::Draft,
+                            'bg-amber-500 text-white' => $status === $availableStatus->value && $availableStatus === DispatchStatus::InProgress,
+                            'bg-emerald-600 text-white' => $status === $availableStatus->value && $availableStatus === DispatchStatus::Done,
+                            'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-white/5' => $status !== $availableStatus->value && ! $this->isDone() && $availableStatus !== DispatchStatus::Done,
+                            'cursor-not-allowed text-slate-400' => $status !== $availableStatus->value && ($this->isDone() || $availableStatus === DispatchStatus::Done),
                         ])
                     >
                         {{ $availableStatus->label() }}

@@ -61,6 +61,18 @@ test('users only see and access authorized dispatch modules', function () {
         ->assertForbidden();
 });
 
+test('dispatch form shows the three-step status bar', function () {
+    $administrator = User::factory()->create(['role' => UserRole::Admin]);
+
+    $this->actingAs($administrator)
+        ->get(route('dispatches.create'))
+        ->assertSuccessful()
+        ->assertSee('Estado del despacho')
+        ->assertSee('Borrador')
+        ->assertSee('En proceso')
+        ->assertSee('Hecho');
+});
+
 test('a dispatch selects pending nivs and marks them as dispatched when finalized', function () {
     $administrator = User::factory()->create(['role' => UserRole::Admin]);
     $first = MsCertificado::factory()->create(['niv' => '8YZC7MCC0TD000001']);
