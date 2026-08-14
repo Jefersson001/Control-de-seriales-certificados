@@ -159,6 +159,34 @@ test('dispatch form shows the three-step status bar', function () {
         ->assertSee('Hecho');
 });
 
+test('dispatches can be filtered by status', function () {
+    $administrator = User::factory()->create(['role' => UserRole::Admin]);
+    Dispatch::query()->create([
+        'name' => 'WH/OUT/DRAFT',
+        'status' => DispatchStatus::Draft,
+    ]);
+    Dispatch::query()->create([
+        'name' => 'WH/OUT/PROGRESS',
+        'status' => DispatchStatus::InProgress,
+    ]);
+    Dispatch::query()->create([
+        'name' => 'WH/OUT/DONE',
+        'status' => DispatchStatus::Done,
+    ]);
+
+    $this->actingAs($administrator);
+
+    Livewire::test('dispatch-list')
+        ->assertSee('Todos los estados')
+        ->set('statusFilter', DispatchStatus::InProgress->value)
+        ->assertSee('WH/OUT/PROGRESS')
+        ->assertDontSee('WH/OUT/DRAFT')
+        ->assertDontSee('WH/OUT/DONE')
+        ->set('statusFilter', DispatchStatus::Done->value)
+        ->assertSee('WH/OUT/DONE')
+        ->assertDontSee('WH/OUT/PROGRESS');
+});
+
 test('returns only list dispatched certificates and mark them as returned when finalized', function () {
     $administrator = User::factory()->create(['role' => UserRole::Admin]);
     $dispatched = MsCertificado::factory()->create([

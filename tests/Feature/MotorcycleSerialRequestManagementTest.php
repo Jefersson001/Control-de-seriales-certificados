@@ -50,6 +50,34 @@ test('requests can be searched by product in real time', function () {
         ->assertDontSee('Moto deportiva');
 });
 
+test('requests can be filtered by status', function () {
+    $administrator = User::factory()->create(['role' => UserRole::Admin]);
+    MotorcycleSerialRequest::factory()->create([
+        'status' => MotorcycleSerialRequestStatus::Draft,
+        'request_date' => '2026-08-01',
+    ]);
+    MotorcycleSerialRequest::factory()->create([
+        'status' => MotorcycleSerialRequestStatus::InProgress,
+        'request_date' => '2026-08-02',
+    ]);
+    MotorcycleSerialRequest::factory()->create([
+        'status' => MotorcycleSerialRequestStatus::Done,
+        'request_date' => '2026-08-03',
+    ]);
+
+    $this->actingAs($administrator);
+
+    Livewire::test('motorcycle-serial-request-list')
+        ->assertSee('Todos los estados')
+        ->set('statusFilter', MotorcycleSerialRequestStatus::InProgress->value)
+        ->assertSee('02/08/2026')
+        ->assertDontSee('01/08/2026')
+        ->assertDontSee('03/08/2026')
+        ->set('statusFilter', MotorcycleSerialRequestStatus::Done->value)
+        ->assertSee('03/08/2026')
+        ->assertDontSee('02/08/2026');
+});
+
 test('authorized users can create a draft request related to a product', function () {
     $user = User::factory()->create([
         'permissions' => [

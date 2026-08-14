@@ -16,6 +16,8 @@ new class extends Component
 
     public string $search = '';
 
+    public string $statusFilter = 'all';
+
     public $perPage = 10;
 
     public bool $showDeleteConfirmation = false;
@@ -36,6 +38,15 @@ new class extends Component
     public function updatedSearch(): void
     {
         $this->resetPage();
+    }
+
+    public function updatedStatusFilter(): void
+    {
+        $this->statusFilter = MotorcycleSerialRequestStatus::tryFrom($this->statusFilter) !== null
+            ? $this->statusFilter
+            : 'all';
+        $this->resetPage();
+        unset($this->requests);
     }
 
     public function updatedPerPage(mixed $value): void
@@ -94,6 +105,10 @@ new class extends Component
 
         return MotorcycleSerialRequest::query()
             ->with(['lines.product:id,name', 'user:id,name'])
+            ->when(
+                MotorcycleSerialRequestStatus::tryFrom($this->statusFilter) !== null,
+                fn (Builder $query): Builder => $query->where('status', $this->statusFilter),
+            )
             ->when($search !== '', function (Builder $query) use ($search): void {
                 $query->where(function (Builder $query) use ($search): void {
                     $query
@@ -148,6 +163,21 @@ new class extends Component
                 <input id="request-search" wire:model.live.debounce.300ms="search" type="search" placeholder="Buscar por número, producto o usuario..." class="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-12 pr-4 text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-500/10 dark:border-white/10 dark:bg-slate-950/60 dark:text-white">
                 <span wire:loading wire:target="search" class="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-medium text-violet-600 dark:text-violet-300">Buscando...</span>
                 </div>
+            </div>
+            <div class="w-full sm:max-w-xs">
+                <label for="request-status-filter" class="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    Filtrar por estado
+                </label>
+                <select
+                    id="request-status-filter"
+                    wire:model.live="statusFilter"
+                    class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-950 outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-500/10 dark:border-white/10 dark:bg-slate-950/60 dark:text-white"
+                >
+                    <option value="all">Todos los estados</option>
+                    @foreach (MotorcycleSerialRequestStatus::cases() as $requestStatus)
+                        <option value="{{ $requestStatus->value }}">{{ $requestStatus->label() }}</option>
+                    @endforeach
+                </select>
             </div>
             <x-per-page-selector id="requests-per-page" />
         </div>

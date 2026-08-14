@@ -15,6 +15,7 @@ new class extends Component
     use WithPagination;
 
     public string $search = '';
+    public string $statusFilter = 'all';
     public int $perPage = 10;
 
     public bool $showDeleteConfirmation = false;
@@ -35,6 +36,15 @@ new class extends Component
         $this->resetPage();
     }
 
+    public function updatedStatusFilter(): void
+    {
+        $this->statusFilter = DispatchStatus::tryFrom($this->statusFilter) !== null
+            ? $this->statusFilter
+            : 'all';
+        $this->resetPage();
+        unset($this->dispatches);
+    }
+
     public function updatedPerPage(mixed $value): void
     {
         $this->perPage = is_numeric($value) ? max(1, min((int) $value, 10000)) : 10;
@@ -49,6 +59,10 @@ new class extends Component
         return Dispatch::query()
             ->with('creator:id,name')
             ->withCount('lines')
+            ->when(
+                DispatchStatus::tryFrom($this->statusFilter) !== null,
+                fn (Builder $query): Builder => $query->where('status', $this->statusFilter),
+            )
             ->when($search !== '', fn (Builder $query) => $query->where(function (Builder $query) use ($search): void {
                 $query->where('name', 'like', "%{$search}%")
                     ->orWhereHas('creator', fn (Builder $query) => $query->where('name', 'like', "%{$search}%"));
@@ -110,6 +124,21 @@ new class extends Component
             <div class="w-full max-w-lg">
                 <label for="dispatch-search" class="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-500">Buscar</label>
                 <input id="dispatch-search" wire:model.live.debounce.300ms="search" type="search" placeholder="Nombre de Odoo o usuario..." class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 dark:border-white/10 dark:bg-slate-950/60">
+            </div>
+            <div class="w-full sm:max-w-xs">
+                <label for="dispatch-status-filter" class="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    Filtrar por estado
+                </label>
+                <select
+                    id="dispatch-status-filter"
+                    wire:model.live="statusFilter"
+                    class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-950 outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 dark:border-white/10 dark:bg-slate-950/60 dark:text-white"
+                >
+                    <option value="all">Todos los estados</option>
+                    @foreach (DispatchStatus::cases() as $dispatchStatus)
+                        <option value="{{ $dispatchStatus->value }}">{{ $dispatchStatus->label() }}</option>
+                    @endforeach
+                </select>
             </div>
             <x-per-page-selector id="dispatches-per-page" />
         </div>
