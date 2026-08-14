@@ -1,7 +1,7 @@
 <?php
 
 use App\Actions\Dispatches\FinalizeDispatch;
-use App\Actions\Dispatches\ImportDispatchNivs;
+use App\Actions\Dispatches\ImportDispatchPdf;
 use App\CertificateStatus;
 use App\DispatchStatus;
 use App\Models\Dispatch;
@@ -26,10 +26,10 @@ new class extends Component
     public string $status = 'draft';
     public string $nivSearch = '';
     public array $selectedIds = [];
-    public mixed $importFile = null;
+    public mixed $importPdf = null;
     public bool $showFinalizeConfirmation = false;
     public ?string $statusMessage = null;
-    public ?string $importMessage = null;
+    public ?string $importPdfMessage = null;
 
     public function mount(?int $dispatchId = null): void
     {
@@ -126,18 +126,18 @@ new class extends Component
         unset($this->selectedRecords);
     }
 
-    public function importWorkbook(ImportDispatchNivs $importer): void
+    public function importDispatchPdf(ImportDispatchPdf $importer): void
     {
         $this->authorizeEdit();
         $this->validate([
-            'importFile' => ['required', 'file', 'mimes:xlsx', 'max:'.max(1, intdiv((int) config('livewire.payload.max_size', 1048576), 1024))],
+            'importPdf' => ['required', 'file', 'mimes:pdf', 'max:'.max(1, intdiv((int) config('livewire.payload.max_size', 1048576), 1024))],
         ], [
-            'importFile.required' => 'Selecciona un archivo Excel.',
-            'importFile.mimes' => 'El archivo debe tener formato XLSX.',
+            'importPdf.required' => 'Selecciona un archivo PDF.',
+            'importPdf.mimes' => 'El archivo debe tener formato PDF.',
         ]);
 
         try {
-            $result = $importer->handle($this->importFile->getRealPath());
+            $result = $importer->handle($this->importPdf->getRealPath());
             $existingNivs = $this->selectedRecords->pluck('niv')->flip();
             $added = 0;
 
@@ -152,13 +152,47 @@ new class extends Component
             }
 
             $this->selectedIds = array_values(array_unique($this->selectedIds));
-            $this->importMessage = "Se agregaron {$added} NIV. {$result['unavailable']} valores no coincidieron con registros disponibles por despachar.";
-            $this->importFile = null;
+
+            if ($this->name === '' && $result['dispatchName'] !== null) {
+                $this->name = $result['dispatchName'];
+            }
+
+            $this->importPdfMessage = $this->buildImportPdfMessage($result, $added);
             unset($this->selectedRecords);
         } catch (Throwable $exception) {
             report($exception);
-            $this->addError('importFile', 'No fue posible leer el Excel. Verifica que el archivo no esté dañado.');
+            $this->addError('importPdf', 'No fue posible leer el PDF. Verifica que el archivo no esté dañado.');
         }
+    }
+
+    /**
+     * @param  array{detected: int, notFound: list<string>, alreadyDispatched: list<string>}  $result
+     */
+    private function buildImportPdfMessage(array $result, int $added): string
+    {
+        $notFound = $result['notFound'] ?? [];
+        $alreadyDispatched = $result['alreadyDispatched'] ?? [];
+        $detected = $result['detected'] ?? 0;
+
+        $parts = [];
+
+        $parts[] = "El PDF contiene {$detected} seriales, de los cuales {$added} fueron encontrados en el maestro de seriales y se agregaron al despacho.";
+
+        if ($notFound !== []) {
+            $parts[] = count($notFound)
+                .' no existen en el maestro de seriales: '
+                .implode(', ', $notFound)
+                .'.';
+        }
+
+        if ($alreadyDispatched !== []) {
+            $parts[] = count($alreadyDispatched)
+                .' ya fueron despachados y no están disponibles: '
+                .implode(', ', $alreadyDispatched)
+                .'.';
+        }
+
+        return implode(' ', $parts);
     }
 
     public function save(): mixed
@@ -341,37 +375,39 @@ new class extends Component
                     <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Registros relacionados con el Maestro de Seriales Certificados. {{ count($selectedIds) }} seleccionados.</p>
                 </div>
                 @if (! $this->isDone())
-                    <label class="inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 rounded-xl bg-violet-600 px-5 py-3 font-semibold text-white shadow-sm transition hover:bg-violet-500">
-                        <input wire:model="importFile" type="file" accept=".xlsx" class="sr-only">
-                        <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0-4 4m4-4 4 4M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3"/></svg>
-                        Seleccionar Excel
-                    </label>
+                    <div class="flex shrink-0 flex-wrap items-center gap-3">
+                        <label class="inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 rounded-xl bg-rose-600 px-5 py-3 font-semibold text-white shadow-sm transition hover:bg-rose-500">
+                            <input wire:model="importPdf" type="file" accept=".pdf,application/pdf" class="sr-only">
+                            <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0-4 4m4-4 4 4M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3"/></svg>
+                            Seleccionar PDF
+                        </label>
+                    </div>
                 @endif
             </div>
 
             @if (! $this->isDone())
-                <div wire:loading wire:target="importFile" class="mb-6 w-full rounded-2xl border border-violet-200 bg-violet-50 px-5 py-4 text-sm font-semibold text-violet-700 dark:border-violet-500/20 dark:bg-violet-500/10 dark:text-violet-200">
+                <div wire:loading wire:target="importPdf" class="mb-6 w-full rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm font-semibold text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-200">
                     <span class="inline-flex items-center gap-2">
                         <svg class="size-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle class="opacity-25" cx="12" cy="12" r="9" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M21 12a9 9 0 0 0-9-9v3a6 6 0 0 1 6 6h3Z"/></svg>
                         Cargando archivo...
                     </span>
                 </div>
 
-                @if ($importFile)
-                    <div wire:loading.remove wire:target="importFile" class="mb-6 flex w-full flex-col gap-4 rounded-2xl border border-violet-200 bg-violet-50 p-5 dark:border-violet-500/20 dark:bg-violet-500/10 sm:flex-row sm:items-center sm:justify-between">
+                @if ($importPdf)
+                    <div wire:loading.remove wire:target="importPdf" class="mb-6 flex w-full flex-col gap-4 rounded-2xl border border-rose-200 bg-rose-50 p-5 dark:border-rose-500/20 dark:bg-rose-500/10 sm:flex-row sm:items-center sm:justify-between">
                         <div class="min-w-0">
-                            <p class="truncate font-semibold text-violet-950 dark:text-violet-100">{{ $importFile->getClientOriginalName() }}</p>
-                            <p class="mt-2 text-sm text-violet-700 dark:text-violet-300">Se buscarán NIV de 17 caracteres en todas las hojas del archivo.</p>
+                            <p class="truncate font-semibold text-rose-950 dark:text-rose-100">{{ $importPdf->getClientOriginalName() }}</p>
+                            <p class="mt-2 text-sm text-rose-700 dark:text-rose-300">Se leerán los seriales de la tabla Lote/Nº de serie y se completará el nombre del despacho.</p>
                         </div>
-                        <button wire:click="importWorkbook" wire:loading.attr="disabled" wire:target="importWorkbook" type="button" class="shrink-0 rounded-xl bg-violet-600 px-5 py-3 font-semibold text-white transition hover:bg-violet-500 disabled:cursor-wait disabled:opacity-60">
-                            <span wire:loading.remove wire:target="importWorkbook">Procesar Excel</span>
-                            <span wire:loading wire:target="importWorkbook">Procesando...</span>
+                        <button wire:click="importDispatchPdf" wire:loading.attr="disabled" wire:target="importDispatchPdf" type="button" class="shrink-0 rounded-xl bg-rose-600 px-5 py-3 font-semibold text-white transition hover:bg-rose-500 disabled:cursor-wait disabled:opacity-60">
+                            <span wire:loading.remove wire:target="importDispatchPdf">Procesar PDF</span>
+                            <span wire:loading wire:target="importDispatchPdf">Procesando...</span>
                         </button>
                     </div>
                 @endif
 
-                @error('importFile') <p class="mb-6 rounded-xl bg-rose-100 px-4 py-3 text-sm font-medium text-rose-700 dark:bg-rose-500/15 dark:text-rose-200">{{ $message }}</p> @enderror
-                @if ($importMessage)<p role="status" class="mb-6 rounded-xl bg-emerald-100 px-4 py-3 text-sm font-medium text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200">{{ $importMessage }}</p>@endif
+                @error('importPdf') <p class="mb-6 rounded-xl bg-rose-100 px-4 py-3 text-sm font-medium text-rose-700 dark:bg-rose-500/15 dark:text-rose-200">{{ $message }}</p> @enderror
+                @if ($importPdfMessage)<p role="status" class="mb-6 rounded-xl bg-emerald-100 px-4 py-3 text-sm font-medium text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200">{{ $importPdfMessage }}</p>@endif
 
                 <div>
                     <div class="relative rounded-2xl border border-slate-200 p-5 dark:border-white/10">

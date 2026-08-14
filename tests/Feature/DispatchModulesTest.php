@@ -11,6 +11,7 @@ use App\Models\User;
 use App\ReturnStatus;
 use App\UserPermission;
 use App\UserRole;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use PdfDecompressor\Normalizer;
@@ -246,6 +247,119 @@ test('returns list only shows manually created returns', function () {
     Livewire::test('return-list')
         ->assertSee('RET-0001')
         ->assertDontSee('8YZC7MCC0TD000101');
+});
+
+test('a dispatch imports pending nivs and the odoo name from a PDF', function () {
+    $administrator = User::factory()->create(['role' => UserRole::Admin]);
+    $first = MsCertificado::factory()->create(['niv' => '8YZBXMEA1TD008280']);
+    $second = MsCertificado::factory()->create(['niv' => '8YZBXMEA7TD008283']);
+    $dispatched = MsCertificado::factory()->create([
+        'niv' => '8YZBXMEA5TD008265',
+        'status' => CertificateStatus::Dispatched,
+    ]);
+    $content = makeCertificatePdf([
+        'PLM-PT-LM/OUT/166202',
+        'Producto Lote/N de serie Entregado',
+        '[BR200BR212604] BR 200 (NEGRO) 8YZBXMEA1TD008280 1,00 Unidades',
+        '[BR200BR212604] BR 200 (NEGRO) 8YZBXMEA7TD008283 1,00 Unidades',
+        '[BR200BR212604] BR 200 (NEGRO) 8YZBXMEA5TD008265 1,00 Unidades',
+    ]);
+
+    $this->actingAs($administrator);
+
+    Livewire::test('dispatch-form')
+        ->set('importPdf', UploadedFile::fake()->createWithContent('carga.pdf', $content))
+        ->call('importDispatchPdf')
+        ->assertHasNoErrors()
+        ->assertSet('name', 'PLM-PT-LM/OUT/166202')
+        ->assertSet('selectedIds', [$first->id, $second->id])
+        ->assertSee('8YZBXMEA1TD008280')
+        ->assertSee('8YZBXMEA7TD008283')
+        ->assertDontSee('8YZBXMEA5TD008265');
+
+    expect($dispatched->refresh()->status)->toBe(CertificateStatus::Dispatched);
+});
+
+test('a dispatch pdf import keeps an existing odoo name', function () {
+    $administrator = User::factory()->create(['role' => UserRole::Admin]);
+    MsCertificado::factory()->create(['niv' => '8YZBXMEA1TD008280']);
+    $content = makeCertificatePdf([
+        'PLM-PT-LM/OUT/166202',
+        'Producto Lote/N de serie Entregado',
+        '[BR200BR212604] BR 200 (NEGRO) 8YZBXMEA1TD008280 1,00 Unidades',
+    ]);
+
+    $this->actingAs($administrator);
+
+    Livewire::test('dispatch-form')
+        ->set('name', 'WH/OUT/00099')
+        ->set('importPdf', UploadedFile::fake()->createWithContent('carga.pdf', $content))
+        ->call('importDispatchPdf')
+        ->assertHasNoErrors()
+        ->assertSet('name', 'WH/OUT/00099');
+});
+
+test('a dispatch pdf import reports serials not found in the master', function () {
+    $administrator = User::factory()->create(['role' => UserRole::Admin]);
+    $content = makeCertificatePdf([
+        'PLM-PT-LM/OUT/166202',
+        'Producto Lote/N de serie Entregado',
+        '[BR200BR212604] BR 200 (NEGRO) 8YZBXMEA1TD008280 1,00 Unidades',
+    ]);
+
+    $this->actingAs($administrator);
+
+    Livewire::test('dispatch-form')
+        ->set('importPdf', UploadedFile::fake()->createWithContent('carga.pdf', $content))
+        ->call('importDispatchPdf')
+        ->assertHasNoErrors()
+        ->assertSet('selectedIds', [])
+        ->assertSee('1 no existen en el maestro de seriales')
+        ->assertSee('8YZBXMEA1TD008280');
+});
+
+test('a dispatch pdf import reports serials that were already dispatched', function () {
+    $administrator = User::factory()->create(['role' => UserRole::Admin]);
+    $dispatched = MsCertificado::factory()->create([
+        'niv' => '8YZBXMEA1TD008280',
+        'status' => CertificateStatus::Dispatched,
+    ]);
+    $content = makeCertificatePdf([
+        'PLM-PT-LM/OUT/166202',
+        'Producto Lote/N de serie Entregado',
+        '[BR200BR212604] BR 200 (NEGRO) 8YZBXMEA1TD008280 1,00 Unidades',
+    ]);
+
+    $this->actingAs($administrator);
+
+    Livewire::test('dispatch-form')
+        ->set('importPdf', UploadedFile::fake()->createWithContent('carga.pdf', $content))
+        ->call('importDispatchPdf')
+        ->assertHasNoErrors()
+        ->assertSet('selectedIds', [])
+        ->assertSee('1 ya fueron despachados')
+        ->assertSee('8YZBXMEA1TD008280');
+
+    expect($dispatched->refresh()->status)->toBe(CertificateStatus::Dispatched);
+});
+
+test('a dispatch keeps the selected pdf file after processing', function () {
+    $administrator = User::factory()->create(['role' => UserRole::Admin]);
+    MsCertificado::factory()->create(['niv' => '8YZBXMEA1TD008280']);
+    $content = makeCertificatePdf([
+        'PLM-PT-LM/OUT/166202',
+        'Producto Lote/N de serie Entregado',
+        '[BR200BR212604] BR 200 (NEGRO) 8YZBXMEA1TD008280 1,00 Unidades',
+    ]);
+
+    $this->actingAs($administrator);
+
+    Livewire::test('dispatch-form')
+        ->set('importPdf', UploadedFile::fake()->createWithContent('carga.pdf', $content))
+        ->call('importDispatchPdf')
+        ->assertHasNoErrors()
+        ->assertNotSet('importPdf', null)
+        ->assertSee('carga.pdf');
 });
 
 test('a dispatch selects pending nivs and marks them as dispatched when finalized', function () {
