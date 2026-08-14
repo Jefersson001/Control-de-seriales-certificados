@@ -405,7 +405,7 @@ new class extends Component
             <table class="w-full min-w-7xl text-left">
                 <thead class="bg-slate-50 text-xs uppercase tracking-wider text-slate-500 dark:bg-slate-950/40 dark:text-slate-400">
                     <tr>
-                        <th class="px-5 py-4 font-semibold">NO</th>
+                        <th class="px-5 py-4 font-semibold">NRO</th>
                         <th class="px-5 py-4 font-semibold">Marca</th>
                         <th class="px-5 py-4 font-semibold">Modelo</th>
                         <th class="px-5 py-4 font-semibold">Tipo</th>
@@ -413,7 +413,7 @@ new class extends Component
                         <th class="px-5 py-4 font-semibold">Año</th>
                         <th class="px-5 py-4 font-semibold">NIV</th>
                         <th class="px-5 py-4 font-semibold">Status</th>
-                        <th class="px-5 py-4 font-semibold">No Certificado</th>
+                        <th class="px-5 py-4 font-semibold">Certificado</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100 dark:divide-white/5">
