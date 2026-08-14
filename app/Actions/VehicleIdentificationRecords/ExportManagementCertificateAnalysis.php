@@ -26,29 +26,50 @@ class ExportManagementCertificateAnalysis
         'Motivo',
     ];
 
-    public function __construct(private HydrateManagementCertificateSourceData $sourceDataHydrator) {}
+    public function __construct(
+        private HydrateManagementCertificateSourceData $sourceDataHydrator,
+        private ProcessManagementCertificates $processor,
+    ) {}
 
     public function handle(
         VehicleIdentificationRecordManagement $management,
         string $category,
     ): BinaryFileResponse {
         $this->sourceDataHydrator->handle($management);
-        $classification = $this->classificationFor($category);
-        $results = $management->certificates()
-            ->with(['serialResults' => fn ($query) => $query
-                ->where('classification', $classification)
-                ->orderBy('id')])
-            ->orderBy('id')
-            ->get()
-            ->flatMap(fn ($certificate) => $certificate->serialResults
-                ->when($category === 'duplicates', fn ($serialResults) => $serialResults->filter(
-                    fn ($result): bool => (bool) ($result->source_data['_requested']
-                        ?? ! str_contains($result->reason ?? '', 'no solicitado')),
-                ))
-                ->flatMap(
-                    fn ($result): array => $this->spreadsheetRow($category, $certificate->control_number, $result),
-                ))
-            ->all();
+        if ($category === 'missing') {
+            $results = collect($this->processor->summary($management)['missingSerials'])
+                ->map(fn (array $row): array => [
+                    'Sin certificar',
+                    null,
+                    '',
+                    '',
+                    '',
+                    '',
+                    '',
+                    '',
+                    $row['serial'],
+                    '',
+                    'El serial pertenece a la solicitud, pero no aparece en ningún certificado procesado.',
+                ])
+                ->all();
+        } else {
+            $classification = $this->classificationFor($category);
+            $results = $management->certificates()
+                ->with(['serialResults' => fn ($query) => $query
+                    ->where('classification', $classification)
+                    ->orderBy('id')])
+                ->orderBy('id')
+                ->get()
+                ->flatMap(fn ($certificate) => $certificate->serialResults
+                    ->when($category === 'duplicates', fn ($serialResults) => $serialResults->filter(
+                        fn ($result): bool => (bool) ($result->source_data['_requested']
+                            ?? ! str_contains($result->reason ?? '', 'no solicitado')),
+                    ))
+                    ->flatMap(
+                        fn ($result): array => $this->spreadsheetRow($category, $certificate->control_number, $result),
+                    ))
+                ->all();
+        }
 
         if ($results === []) {
             throw new RuntimeException('No hay registros disponibles para esta exportación.');
@@ -85,6 +106,7 @@ class ExportManagementCertificateAnalysis
         return match ($category) {
             'certified' => VehicleIdentificationRecordCertificateSerialClassification::Certified,
             'duplicates' => VehicleIdentificationRecordCertificateSerialClassification::Duplicate,
+            'unexpected' => VehicleIdentificationRecordCertificateSerialClassification::Unexpected,
             'invalid' => VehicleIdentificationRecordCertificateSerialClassification::Invalid,
             default => throw new RuntimeException('La categoría de exportación no es válida.'),
         };
@@ -110,7 +132,12 @@ class ExportManagementCertificateAnalysis
             ];
         } else {
             $row = [
-                $category === 'certified' ? 'Certificado' : 'Duplicado',
+                match ($category) {
+                    'certified' => 'Certificado',
+                    'duplicates' => 'Duplicado',
+                    'unexpected' => 'No solicitado',
+                    default => $category,
+                },
                 null,
                 $source['no'] ?? '',
                 $source['marca'] ?? '',

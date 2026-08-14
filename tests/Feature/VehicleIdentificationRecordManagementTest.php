@@ -497,6 +497,8 @@ test('certificate analysis exports and imports only selectable categories', func
         ->assertSee('Incluir al importar')
         ->assertSeeHtml('wire:model.live="includeCertified"')
         ->assertSeeHtml('wire:model.live="includeDuplicates"')
+        ->assertSeeHtml('wire:model.live="includeUnexpected"')
+        ->assertSeeHtml('wire:model.live="includeMissing"')
         ->assertSeeHtml('wire:model.live="includeInvalid"')
         ->assertSee('Importando registros al maestro')
         ->assertSee('Progreso de la importación al Maestro de Seriales Certificados')
@@ -526,6 +528,66 @@ test('certificate analysis exports and imports only selectable categories', func
     expect($secondImport['imported'])->toBe(0)
         ->and(MsCertificado::query()->count())->toBe(4)
         ->and(CertificateDocument::query()->count())->toBe(1);
+});
+
+test('unexpected and missing serials can be exported and optionally imported', function () {
+    Storage::fake('local');
+    $administrator = User::factory()->create(['role' => UserRole::Admin]);
+    $management = VehicleIdentificationRecordManagement::factory()->create();
+    $missingNivs = $management->motorcycleSerialRequest->lines()
+        ->with('serialEntries:id,motorcycle_serial_request_line_id,serial')
+        ->get()
+        ->flatMap->serialEntries
+        ->pluck('serial')
+        ->unique()
+        ->values();
+    $certificate = $management->certificates()->create([
+        'control_number' => 'DG-NIV-RG5-0601-PC',
+        'original_file_name' => 'adicionales.pdf',
+        'file_path' => 'certificates/adicionales.pdf',
+        'file_hash' => hash('sha256', 'adicionales'),
+        'valid_occurrence_count' => 1,
+        'invalid_count' => 0,
+        'analyzed_at' => now(),
+    ]);
+    Storage::disk('local')->put($certificate->file_path, '%PDF-1.4 adicionales');
+    $unexpectedNiv = '8YZC7MCC0TD888888';
+    $certificate->serialResults()->create([
+        'classification' => VehicleIdentificationRecordCertificateSerialClassification::Unexpected,
+        'serial' => $unexpectedNiv,
+        'occurrences' => 1,
+        'source_data' => [
+            'no' => '99',
+            'marca' => 'BERA',
+            'modelo' => 'BR 150 BRF',
+            'tipo' => 'MOTOCICLETA',
+            'fabricacion' => '2026',
+            'anio' => 2026,
+            'niv' => $unexpectedNiv,
+            'codigo' => 'DG-NIV-RG5-0601-PC',
+            '_requested' => false,
+        ],
+    ]);
+
+    $this->actingAs($administrator);
+
+    $unexpectedExport = app(ExportManagementCertificateAnalysis::class)->handle($management, 'unexpected');
+    $missingExport = app(ExportManagementCertificateAnalysis::class)->handle($management, 'missing');
+
+    expect($unexpectedExport->getFile()->isFile())->toBeTrue()
+        ->and($missingExport->getFile()->isFile())->toBeTrue();
+
+    $result = app(ImportManagementCertificateAnalysis::class)
+        ->handle($management, false, false, false, true, true);
+
+    expect($result['unexpected'])->toBe(1)
+        ->and($result['missing'])->toBe($missingNivs->count())
+        ->and($result['imported'])->toBe(1 + $missingNivs->count())
+        ->and(MsCertificado::query()->where('niv', $unexpectedNiv)->where('codigo', 'DG-NIV-RG5-0601-PC')->exists())->toBeTrue();
+
+    foreach ($missingNivs as $missingNiv) {
+        expect(MsCertificado::query()->where('niv', $missingNiv)->where('codigo', '')->exists())->toBeTrue();
+    }
 });
 
 test('legacy certificate source data is recovered from its stored pdf', function () {

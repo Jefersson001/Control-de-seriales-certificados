@@ -20,12 +20,14 @@ class ImportManagementCertificateAnalysis
         private StoreCertificateDocument $certificateDocumentStore,
     ) {}
 
-    /** @return array{imported: int, certified: int, duplicates: int, invalid: int, skipped: int} */
+    /** @return array{imported: int, certified: int, duplicates: int, unexpected: int, missing: int, invalid: int, skipped: int} */
     public function handle(
         VehicleIdentificationRecordManagement $management,
         bool $includeCertified,
         bool $includeDuplicates,
         bool $includeInvalid,
+        bool $includeUnexpected = false,
+        bool $includeMissing = false,
     ): array {
         $this->sourceDataHydrator->handle($management);
 
@@ -36,10 +38,13 @@ class ImportManagementCertificateAnalysis
                 $includeCertified,
                 $includeDuplicates,
                 $includeInvalid,
+                $includeUnexpected,
+                $includeMissing,
             ): array {
                 $selected = collect([
                     VehicleIdentificationRecordCertificateSerialClassification::Certified->value => $includeCertified,
                     VehicleIdentificationRecordCertificateSerialClassification::Duplicate->value => $includeDuplicates,
+                    VehicleIdentificationRecordCertificateSerialClassification::Unexpected->value => $includeUnexpected,
                     VehicleIdentificationRecordCertificateSerialClassification::Invalid->value => $includeInvalid,
                 ])->filter()->keys()->all();
                 $results = VehicleIdentificationRecordCertificateSerial::query()
@@ -49,13 +54,29 @@ class ImportManagementCertificateAnalysis
                     ->whereNull('imported_at')
                     ->orderBy('id')
                     ->get();
+                $missingSerials = collect();
+
+                if ($includeMissing) {
+                    $management->load('motorcycleSerialRequest.lines.serialEntries:id,motorcycle_serial_request_line_id,serial');
+                    $certifiedRequestSerialIds = VehicleIdentificationRecordCertificateSerial::query()
+                        ->whereHas('certificate', fn ($query) => $query->where('management_id', $management->id))
+                        ->where('classification', VehicleIdentificationRecordCertificateSerialClassification::Certified)
+                        ->pluck('request_serial_id')
+                        ->filter()
+                        ->flip();
+                    $missingSerials = $management->motorcycleSerialRequest->lines
+                        ->flatMap->serialEntries
+                        ->reject(fn ($serial): bool => $certifiedRequestSerialIds->has($serial->id))
+                        ->values();
+                }
+
                 $existingNivs = MsCertificado::query()
-                    ->whereIn('niv', $results->pluck('serial')->filter()->unique())
+                    ->whereIn('niv', $results->pluck('serial')->merge($missingSerials->pluck('serial'))->filter()->unique())
                     ->pluck('niv')
                     ->mapWithKeys(fn (string $niv): array => [Str::upper(trim($niv)) => true]);
                 $rows = [];
                 $processedResultIds = [];
-                $counts = ['certified' => 0, 'duplicates' => 0, 'invalid' => 0, 'skipped' => 0];
+                $counts = ['certified' => 0, 'duplicates' => 0, 'unexpected' => 0, 'missing' => 0, 'invalid' => 0, 'skipped' => 0];
 
                 foreach ($results as $result) {
                     if (
@@ -96,6 +117,7 @@ class ImportManagementCertificateAnalysis
                     $countKey = match ($result->classification) {
                         VehicleIdentificationRecordCertificateSerialClassification::Certified => 'certified',
                         VehicleIdentificationRecordCertificateSerialClassification::Duplicate => 'duplicates',
+                        VehicleIdentificationRecordCertificateSerialClassification::Unexpected => 'unexpected',
                         VehicleIdentificationRecordCertificateSerialClassification::Invalid => 'invalid',
                         default => null,
                     };
@@ -107,6 +129,22 @@ class ImportManagementCertificateAnalysis
                     if ($result->classification === VehicleIdentificationRecordCertificateSerialClassification::Certified) {
                         $existingNivs->put(Str::upper(trim($record['niv'])), true);
                     }
+                }
+
+                foreach ($missingSerials as $missingSerial) {
+                    $normalizedNiv = Str::upper(trim($missingSerial->serial));
+
+                    if ($existingNivs->has($normalizedNiv)) {
+                        $counts['skipped']++;
+
+                        continue;
+                    }
+
+                    $rows[] = $this->normalizeRecord([
+                        'niv' => $normalizedNiv,
+                    ]);
+                    $existingNivs->put($normalizedNiv, true);
+                    $counts['missing']++;
                 }
 
                 foreach (array_chunk($rows, 500) as $chunk) {

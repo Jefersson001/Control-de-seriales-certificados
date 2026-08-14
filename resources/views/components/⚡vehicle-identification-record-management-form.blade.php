@@ -75,6 +75,10 @@ new class extends Component
 
     public bool $includeDuplicates = false;
 
+    public bool $includeUnexpected = false;
+
+    public bool $includeMissing = false;
+
     public bool $includeInvalid = false;
 
     public function mount(int $managementId): void
@@ -205,7 +209,7 @@ new class extends Component
         ExportManagementCertificateAnalysis $exporter,
     ): ?BinaryFileResponse {
         abort_unless(auth()->user()?->hasPermission(UserPermission::ViewVehicleIdentificationRecordManagement), 403);
-        abort_unless(in_array($category, ['certified', 'duplicates', 'invalid'], true), 404);
+        abort_unless(in_array($category, ['certified', 'duplicates', 'unexpected', 'missing', 'invalid'], true), 404);
 
         try {
             return $exporter->handle($this->management, $category);
@@ -225,10 +229,12 @@ new class extends Component
         $this->validate([
             'includeCertified' => ['boolean'],
             'includeDuplicates' => ['boolean'],
+            'includeUnexpected' => ['boolean'],
+            'includeMissing' => ['boolean'],
             'includeInvalid' => ['boolean'],
         ]);
 
-        if (! $this->includeCertified && ! $this->includeDuplicates && ! $this->includeInvalid) {
+        if (! $this->includeCertified && ! $this->includeDuplicates && ! $this->includeUnexpected && ! $this->includeMissing && ! $this->includeInvalid) {
             $this->addError('certificateSelection', 'Selecciona al menos una categoría para importar.');
 
             return;
@@ -239,6 +245,8 @@ new class extends Component
             $this->includeCertified,
             $this->includeDuplicates,
             $this->includeInvalid,
+            $this->includeUnexpected,
+            $this->includeMissing,
         );
         $this->status = VehicleIdentificationRecordManagementStatus::Done->value;
         $this->persistedDone = true;
@@ -246,7 +254,7 @@ new class extends Component
 
         session()->flash(
             'managementCertificateImportResult',
-            "Se importaron {$result['imported']} registros al maestro ({$result['certified']} certificados, {$result['duplicates']} duplicados y {$result['invalid']} inválidos). {$result['skipped']} registros fueron omitidos.",
+            "Se importaron {$result['imported']} registros al maestro ({$result['certified']} certificados, {$result['duplicates']} duplicados, {$result['unexpected']} no solicitados, {$result['missing']} sin certificar y {$result['invalid']} inválidos). {$result['skipped']} registros fueron omitidos.",
         );
     }
 
@@ -254,6 +262,8 @@ new class extends Component
     {
         return ($this->includeCertified ? count($this->matchedSerials) : 0)
             + ($this->includeDuplicates ? collect($this->duplicateSerials)->sum('occurrences') : 0)
+            + ($this->includeUnexpected ? collect($this->unexpectedSerials)->sum('occurrences') : 0)
+            + ($this->includeMissing ? count($this->missingSerials) : 0)
             + ($this->includeInvalid ? collect($this->invalidPdfRows)->sum('occurrences') : 0);
     }
 
@@ -528,8 +538,24 @@ new class extends Component
                                 <label class="mt-4 flex cursor-pointer items-center gap-2 text-sm font-semibold text-amber-900 dark:text-amber-100"><input wire:model.live="includeDuplicates" type="checkbox" @disabled($duplicateSerials === []) class="size-4 rounded border-amber-300 text-amber-600 focus:ring-amber-500">Incluir al importar</label>
                             @endif
                         </div>
-                        <div class="rounded-2xl bg-orange-50 p-4 dark:bg-orange-500/10"><p class="text-sm font-semibold text-orange-700 dark:text-orange-300">No solicitados</p><p class="mt-1 text-2xl font-semibold text-orange-950 dark:text-orange-100">{{ count($unexpectedSerials) }}</p><p class="mt-2 text-xs leading-5 text-orange-700 dark:text-orange-300">Seriales encontrados en los certificados que no están registrados en la solicitud relacionada.</p></div>
-                        <div class="rounded-2xl bg-rose-50 p-4 dark:bg-rose-500/10"><p class="text-sm font-semibold text-rose-700 dark:text-rose-300">Sin certificar</p><p class="mt-1 text-2xl font-semibold text-rose-950 dark:text-rose-100">{{ count($missingSerials) }}</p><p class="mt-2 text-xs leading-5 text-rose-700 dark:text-rose-300">Seriales registrados en la solicitud que todavía no aparecen en ningún certificado procesado.</p></div>
+                        <div class="rounded-2xl bg-orange-50 p-4 dark:bg-orange-500/10">
+                            <p class="text-sm font-semibold text-orange-700 dark:text-orange-300">No solicitados</p>
+                            <p class="mt-1 text-2xl font-semibold text-orange-950 dark:text-orange-100">{{ count($unexpectedSerials) }}</p>
+                            <p class="mt-2 text-xs leading-5 text-orange-700 dark:text-orange-300">Seriales encontrados en los certificados que no están registrados en la solicitud relacionada.</p>
+                            <button wire:click="exportCertificateAnalysis('unexpected')" wire:loading.attr="disabled" type="button" @disabled($unexpectedSerials === []) class="mt-3 rounded-lg border border-orange-300 px-3 py-2 text-xs font-semibold text-orange-800 transition hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-orange-400/30 dark:text-orange-200 dark:hover:bg-orange-500/10">Exportar</button>
+                            @if (auth()->user()?->hasPermission(UserPermission::ImportCertificates) && ! $persistedDone)
+                                <label class="mt-4 flex cursor-pointer items-center gap-2 text-sm font-semibold text-orange-900 dark:text-orange-100"><input wire:model.live="includeUnexpected" type="checkbox" @disabled($unexpectedSerials === []) class="size-4 rounded border-orange-300 text-orange-600 focus:ring-orange-500">Incluir al importar</label>
+                            @endif
+                        </div>
+                        <div class="rounded-2xl bg-rose-50 p-4 dark:bg-rose-500/10">
+                            <p class="text-sm font-semibold text-rose-700 dark:text-rose-300">Sin certificar</p>
+                            <p class="mt-1 text-2xl font-semibold text-rose-950 dark:text-rose-100">{{ count($missingSerials) }}</p>
+                            <p class="mt-2 text-xs leading-5 text-rose-700 dark:text-rose-300">Seriales registrados en la solicitud que todavía no aparecen en ningún certificado procesado.</p>
+                            <button wire:click="exportCertificateAnalysis('missing')" wire:loading.attr="disabled" type="button" @disabled($missingSerials === []) class="mt-3 rounded-lg border border-rose-300 px-3 py-2 text-xs font-semibold text-rose-800 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-rose-400/30 dark:text-rose-200 dark:hover:bg-rose-500/10">Exportar</button>
+                            @if (auth()->user()?->hasPermission(UserPermission::ImportCertificates) && ! $persistedDone)
+                                <label class="mt-4 flex cursor-pointer items-center gap-2 text-sm font-semibold text-rose-900 dark:text-rose-100"><input wire:model.live="includeMissing" type="checkbox" @disabled($missingSerials === []) class="size-4 rounded border-rose-300 text-rose-600 focus:ring-rose-500">Incluir al importar</label>
+                            @endif
+                        </div>
                         <div class="rounded-2xl bg-slate-100 p-4 dark:bg-white/10">
                             <p class="text-sm font-semibold text-slate-600 dark:text-slate-300">Filas inválidas</p>
                             <p class="mt-1 text-2xl font-semibold">{{ count($invalidPdfRows) }}</p>
