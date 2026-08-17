@@ -13,7 +13,7 @@ return new class extends Migration
     {
         Schema::table('vehicle_identification_record_certificate_serials', function (Blueprint $table) {
             $table->json('source_data')->nullable();
-            $table->timestamp('imported_at')->nullable()->index();
+            $table->timestamp('imported_at')->nullable()->index('vircs_imported_at_index');
         });
     }
 

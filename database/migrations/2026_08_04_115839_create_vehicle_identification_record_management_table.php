@@ -14,8 +14,8 @@ return new class extends Migration
         Schema::create('vehicle_identification_record_management', function (Blueprint $table) {
             $table->id();
             $table->foreignId('motorcycle_serial_request_id')
-                ->unique()
-                ->constrained()
+                ->unique('virm_request_unique')
+                ->constrained('motorcycle_serial_requests', 'id', 'virm_request_fk')
                 ->cascadeOnDelete();
             $table->string('status')->default('draft')->index();
             $table->timestamps();

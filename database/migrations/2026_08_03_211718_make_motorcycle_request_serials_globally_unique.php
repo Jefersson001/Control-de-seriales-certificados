@@ -19,8 +19,9 @@ return new class extends Migration
         });
 
         Schema::table('motorcycle_serial_request_line_serials', function (Blueprint $table) {
-            $table->dropUnique(['motorcycle_serial_request_line_id', 'serial']);
-            $table->unique('serial');
+            $table->index('motorcycle_serial_request_line_id', 'msrls_line_index');
+            $table->dropUnique('msrls_line_serial_unique');
+            $table->unique('serial', 'msrls_serial_unique');
         });
     }
 
@@ -30,8 +31,9 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('motorcycle_serial_request_line_serials', function (Blueprint $table) {
-            $table->dropUnique(['serial']);
-            $table->unique(['motorcycle_serial_request_line_id', 'serial']);
+            $table->dropUnique('msrls_serial_unique');
+            $table->unique(['motorcycle_serial_request_line_id', 'serial'], 'msrls_line_serial_unique');
+            $table->dropIndex('msrls_line_index');
         });
     }
 };

@@ -14,7 +14,7 @@ return new class extends Migration
         Schema::create('vehicle_identification_record_management_certificates', function (Blueprint $table) {
             $table->id();
             $table->foreignId('management_id')
-                ->constrained('vehicle_identification_record_management')
+                ->constrained('vehicle_identification_record_management', 'id', 'virmc_management_fk')
                 ->cascadeOnDelete();
             $table->string('control_number');
             $table->string('original_file_name');

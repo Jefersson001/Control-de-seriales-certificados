@@ -15,11 +15,11 @@ return new class extends Migration
         Schema::create('motorcycle_serial_request_line_serials', function (Blueprint $table) {
             $table->id();
             $table->foreignId('motorcycle_serial_request_line_id')
-                ->constrained()
+                ->constrained('motorcycle_serial_request_lines', 'id', 'msrls_line_fk')
                 ->cascadeOnDelete();
             $table->string('serial');
             $table->timestamps();
-            $table->unique(['motorcycle_serial_request_line_id', 'serial']);
+            $table->unique(['motorcycle_serial_request_line_id', 'serial'], 'msrls_line_serial_unique');
             $table->index('serial');
         });
 

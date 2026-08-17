@@ -13,7 +13,7 @@ return new class extends Migration
     {
         Schema::create('motorcycle_serial_request_lines', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('motorcycle_serial_request_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('motorcycle_serial_request_id')->constrained('motorcycle_serial_requests', 'id', 'msrl_request_fk')->cascadeOnDelete();
             $table->foreignId('product_id')->constrained()->restrictOnDelete();
             $table->unsignedInteger('quantity');
             $table->text('serials');
