@@ -7,6 +7,7 @@ use App\Models\MsCertificado;
 use Illuminate\Support\Str;
 use RuntimeException;
 use Smalot\PdfParser\Config;
+use Smalot\PdfParser\Document;
 use Smalot\PdfParser\Parser;
 
 class ImportDispatchPdf
@@ -26,7 +27,9 @@ class ImportDispatchPdf
 
         $config = new Config;
         $config->setDataTmFontInfoHasToBeIncluded(true);
-        $text = (new Parser([], $config))->parseFile($filePath)->getText();
+        $document = (new Parser([], $config))->parseFile($filePath);
+        $this->normalizeDocumentDetails($document);
+        $text = $document->getText();
 
         $nivs = [];
         preg_match_all('/\b[A-HJ-NPR-Z0-9]{17}\b/', Str::upper($text), $matches);
@@ -92,5 +95,21 @@ class ImportDispatchPdf
             ->upper()
             ->replaceMatches('/\s+/u', '')
             ->toString();
+    }
+
+    private function normalizeDocumentDetails(Document $document): void
+    {
+        try {
+            $refProp = new \ReflectionProperty($document, 'details');
+            $refProp->setAccessible(true);
+            $details = $refProp->getValue($document);
+
+            if (is_array($details) && isset($details['Producer']) && str_starts_with((string) $details['Producer'], 'FPDF')) {
+                $details['Producer'] = 'Disabled_FPDF_Workaround';
+                $refProp->setValue($document, $details);
+            }
+        } catch (\Throwable) {
+            // Silently ignore if reflection is unavailable
+        }
     }
 }

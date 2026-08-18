@@ -233,3 +233,32 @@ test('certificate master is the first grouped menu and contains both modules', f
         ->assertSee('group order-[998]', false)
         ->assertSee('group order-[999]', false);
 });
+
+test('control number regex correctly extracts codes with spaces and variations', function () {
+    $importer = app(ImportCertificatesFromPdf::class);
+
+    $text1 = 'NÚMERO DE CONTROL.:  DG - NIV - RG 1 - 00 8 6 - PC   FABRICADO   POR:   CORPORACION KURI SAM, C.A.';
+    $text2 = 'NÚMERO DE CONTROL DNRT-015-0726-R8A-2897 EL SERVICIO DESCONCENTRADO DE NORMALIZACIÓN';
+    $text3 = 'NÚMERO DE CONTROL: DG-NIV-RG1-0033-PC';
+
+    $ref = new ReflectionMethod($importer, 'findControlNumber');
+    $ref->setAccessible(true);
+
+    expect($ref->invoke($importer, $text1))->toBe('DG-NIV-RG1-0086-PC')
+        ->and($ref->invoke($importer, $text2))->toBe('DNRT-015-0726-R8A-2897')
+        ->and($ref->invoke($importer, $text3))->toBe('DG-NIV-RG1-0033-PC');
+});
+
+test('real sample pdf with fpdf producer and spacing parses properly if file exists', function () {
+    $daErrorPath = 'C:/Users/Usuario/Desktop/errores/da error.pdf';
+    if (! file_exists($daErrorPath)) {
+        return;
+    }
+
+    $importer = app(ImportCertificatesFromPdf::class);
+    $result = $importer->parse($daErrorPath);
+
+    expect($result['controlNumber'])->toBe('DNRT-015-0726-R8A-2897')
+        ->and($result['records'])->toHaveCount(20)
+        ->and($result['invalidCount'])->toBe(0);
+});

@@ -3,11 +3,12 @@
 namespace App\Actions\Certificates;
 
 use App\Models\MsCertificado;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use RuntimeException;
 use Smalot\PdfParser\Config;
+use Smalot\PdfParser\Document;
 use Smalot\PdfParser\Parser;
 
 class ImportCertificatesFromPdf
@@ -51,6 +52,7 @@ class ImportCertificatesFromPdf
         $config = new Config;
         $config->setDataTmFontInfoHasToBeIncluded(true);
         $pdf = (new Parser([], $config))->parseFile($filePath);
+        $this->normalizeDocumentDetails($pdf);
         $controlNumber = null;
         $records = [];
         $invalidCount = 0;
@@ -146,8 +148,7 @@ class ImportCertificatesFromPdf
         array $positionedText,
         string $controlNumber,
         ?int $pageNumber = null,
-    ): array
-    {
+    ): array {
         $items = collect($positionedText)
             ->map(function (array $item): ?array {
                 $matrix = $item[0] ?? [];
@@ -453,18 +454,44 @@ class ImportCertificatesFromPdf
     {
         if (
             preg_match(
-                '/NÚMERO\s+DE\s+CONTROL\.?\s*:\s*([A-Z0-9]+(?:\s*-\s*[A-Z0-9]+)+)/iu',
+                '/NÚMERO\s+DE\s+CONTROL\.?\s*:?\s*([A-Z0-9\s-]+?)(?=\s+(?:FABRICADO|EL\s+SERVICIO|CONSTANCIA|Nro|FECHA|\n|$))/iu',
                 $text,
                 $matches,
             ) !== 1
         ) {
-            return null;
+            if (
+                preg_match(
+                    '/NÚMERO\s+DE\s+CONTROL\.?\s*:?\s*([A-Z0-9]+(?:\s*-\s*[A-Z0-9]+)+)/iu',
+                    $text,
+                    $matches,
+                ) !== 1
+            ) {
+                return null;
+            }
         }
 
-        return Str::of($matches[1])
+        $clean = Str::of($matches[1])
             ->replaceMatches('/\s+/u', '')
             ->upper()
             ->toString();
+
+        return $clean !== '' ? $clean : null;
+    }
+
+    private function normalizeDocumentDetails(Document $document): void
+    {
+        try {
+            $refProp = new \ReflectionProperty($document, 'details');
+            $refProp->setAccessible(true);
+            $details = $refProp->getValue($document);
+
+            if (is_array($details) && isset($details['Producer']) && str_starts_with((string) $details['Producer'], 'FPDF')) {
+                $details['Producer'] = 'Disabled_FPDF_Workaround';
+                $refProp->setValue($document, $details);
+            }
+        } catch (\Throwable) {
+            // Silently ignore if reflection is unavailable
+        }
     }
 
     /**
@@ -482,8 +509,7 @@ class ImportCertificatesFromPdf
         array $records,
         int $invalidCount,
         array $invalidRows = [],
-    ): array
-    {
+    ): array {
         $recordsByNiv = [];
         $duplicateCount = 0;
         $duplicateRows = [];
