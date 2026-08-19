@@ -197,7 +197,7 @@ class ImportCertificatesFromPdf
             $positionAlreadyRegistered = false;
 
             foreach ($rowPositions as $rowPosition) {
-                if (abs($rowPosition - $item['y']) <= 2) {
+                if (abs($rowPosition - $item['y']) <= 4) {
                     $positionAlreadyRegistered = true;
 
                     break;
@@ -211,7 +211,7 @@ class ImportCertificatesFromPdf
 
         foreach ($rowPositions as $rowPosition) {
             $rowItems = $items
-                ->filter(fn (array $item): bool => abs($item['y'] - $rowPosition) <= 2)
+                ->filter(fn (array $item): bool => abs($item['y'] - $rowPosition) <= 4)
                 ->sortBy('x')
                 ->values()
                 ->all();
@@ -240,6 +240,19 @@ class ImportCertificatesFromPdf
             $record = $this->recordFromCells($values, $controlNumber);
 
             if ($record === null) {
+                $repairedValues = $this->repairTrailingCells($rowItems, $boundaries, $values);
+
+                if ($repairedValues !== null) {
+                    $repairedRecord = $this->recordFromCells($repairedValues, $controlNumber);
+
+                    if ($repairedRecord !== null) {
+                        $values = $repairedValues;
+                        $records[] = $repairedRecord;
+
+                        continue;
+                    }
+                }
+
                 $invalidCount++;
                 $invalidRows[] = [
                     'page' => $pageNumber,
@@ -292,6 +305,80 @@ class ImportCertificatesFromPdf
         }
 
         return trim($value);
+    }
+
+    /**
+     * Reassemble the Tipo/Fabricación/Año/NIV columns when a row is invalid
+     * because a text fragment crossed a column boundary.
+     *
+     * @param  list<array{x: float, y: float, text: string, fontSize: float}>  $rowItems
+     * @param  list<float>  $boundaries
+     * @param  array<int, string>  $values
+     * @return array<int, string>|null
+     */
+    private function repairTrailingCells(array $rowItems, array $boundaries, array $values): ?array
+    {
+        $boundaryTipo = $boundaries[3] ?? null;
+        $boundaryModelo = $boundaries[2] ?? null;
+
+        if ($boundaryTipo === null || $boundaryModelo === null) {
+            return null;
+        }
+
+        $tipoParts = [];
+        $tailParts = [];
+
+        foreach ($rowItems as $item) {
+            if ($item['x'] >= $boundaryTipo) {
+                $tailParts[] = $item;
+            } elseif ($item['x'] >= $boundaryModelo) {
+                $tipoParts[] = $item;
+            }
+        }
+
+        if ($tailParts === []) {
+            return null;
+        }
+
+        $joined = implode('', array_column($tailParts, 'text'));
+
+        if (preg_match('/([A-HJ-NPR-Z0-9]+)$/', $joined, $match) !== 1 || mb_strlen($match[1]) < 17) {
+            return null;
+        }
+
+        $niv = mb_substr($match[1], -17);
+        $joined = mb_substr($joined, 0, -17);
+
+        $anio = $this->popRightmostDigits($joined);
+        $fabricacion = $this->popRightmostDigits($joined);
+
+        if ($anio === null || $fabricacion === null) {
+            return null;
+        }
+
+        $tipo = trim(implode(' ', array_column($tipoParts, 'text')).$joined);
+
+        return [
+            $values[0] ?? '',
+            $values[1] ?? '',
+            $values[2] ?? '',
+            $tipo,
+            $fabricacion,
+            $anio,
+            $niv,
+        ];
+    }
+
+    private function popRightmostDigits(string &$text): ?string
+    {
+        if (preg_match_all('/\d{4}/', $text, $matches, PREG_OFFSET_CAPTURE) === false || $matches[0] === []) {
+            return null;
+        }
+
+        $last = end($matches[0]);
+        $text = substr($text, 0, $last[1]).substr($text, $last[1] + 4);
+
+        return $last[0];
     }
 
     /**
