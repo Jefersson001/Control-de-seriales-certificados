@@ -553,7 +553,24 @@ class ImportCertificatesFromPdf
                     $matches,
                 ) !== 1
             ) {
-                return null;
+                if (
+                    preg_match(
+                        '/NÚMERO\s*DE?\s*CONTROL\.?\s*:?\s*([A-Z0-9]+(?:\s*-\s*[A-Z0-9]+)+)(?=\s*(?:FABRICADO|EL\s+SERVICIO|CONSTANCIA|Nro|FECHA|\n|$))/iu',
+                        $text,
+                        $matches,
+                    ) !== 1
+                ) {
+                    $noSpaceText = str_replace(' ', '', $text);
+                    if (
+                        preg_match(
+                            '/NÚMERO\s*DE?\s*CONTROL\.?\s*:?\s*([A-Z0-9]+(?:\s*-\s*[A-Z0-9]+)+)(?=\s*(?:FABRICADO|EL\s+SERVICIO|CONSTANCIA|Nro|FECHA|\n|$))/iu',
+                            $noSpaceText,
+                            $matches,
+                        ) !== 1
+                    ) {
+                        return null;
+                    }
+                }
             }
         }
 
