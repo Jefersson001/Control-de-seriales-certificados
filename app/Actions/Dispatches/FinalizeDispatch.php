@@ -28,7 +28,7 @@ class FinalizeDispatch
 
             $available = MsCertificado::query()
                 ->whereKey($ids)
-                ->where('status', CertificateStatus::PendingDispatch)
+                ->whereIn('status', [CertificateStatus::PendingDispatch, CertificateStatus::Returned])
                 ->lockForUpdate()
                 ->count();
 

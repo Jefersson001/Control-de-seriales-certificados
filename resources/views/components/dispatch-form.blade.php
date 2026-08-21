@@ -92,7 +92,7 @@ new class extends Component
         }
 
         return MsCertificado::query()
-            ->where('status', CertificateStatus::PendingDispatch)
+            ->whereIn('status', [CertificateStatus::PendingDispatch, CertificateStatus::Returned])
             ->whereNotIn('id', $this->selectedIds)
             ->where('niv', 'like', "%{$search}%")
             ->orderBy('niv')
@@ -105,7 +105,7 @@ new class extends Component
         $this->authorizeEdit();
         $record = MsCertificado::query()
             ->whereKey($id)
-            ->where('status', CertificateStatus::PendingDispatch)
+            ->whereIn('status', [CertificateStatus::PendingDispatch, CertificateStatus::Returned])
             ->firstOrFail();
 
         if ($this->selectedRecords->contains('niv', $record->niv)) {
@@ -263,11 +263,11 @@ new class extends Component
 
         $availableCount = MsCertificado::query()
             ->whereKey($validated['selectedIds'])
-            ->where('status', CertificateStatus::PendingDispatch)
+            ->whereIn('status', [CertificateStatus::PendingDispatch, CertificateStatus::Returned])
             ->count();
 
         if ($availableCount !== count($validated['selectedIds'])) {
-            throw new RuntimeException('Uno o más NIV ya no están disponibles en estado Por despachar.');
+            throw new RuntimeException('Uno o más NIV ya no están disponibles para despachar.');
         }
 
         return DB::transaction(function () use ($validated): Dispatch {
