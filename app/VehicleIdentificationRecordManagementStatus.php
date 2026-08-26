@@ -12,7 +12,7 @@ enum VehicleIdentificationRecordManagementStatus: string
     {
         return match ($this) {
             self::Draft => 'Borrador',
-            self::InProgress => 'En proceso',
+            self::InProgress => 'Parcialmente en proceso',
             self::Done => 'Hecho',
         };
     }

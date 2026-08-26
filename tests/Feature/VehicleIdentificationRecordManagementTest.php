@@ -1,13 +1,13 @@
 <?php
 
 use App\Actions\Certificates\ImportCertificatesFromPdf;
-use App\Actions\VehicleIdentificationRecords\ExportManagementCertificateAnalysis;
-use App\Actions\VehicleIdentificationRecords\ImportManagementCertificateAnalysis;
-use App\Actions\VehicleIdentificationRecords\HydrateManagementCertificateSourceData;
 use App\Actions\VehicleIdentificationRecords\CompareRequestSerialsWithPdf;
-use App\Models\MsCertificado;
+use App\Actions\VehicleIdentificationRecords\ExportManagementCertificateAnalysis;
+use App\Actions\VehicleIdentificationRecords\HydrateManagementCertificateSourceData;
+use App\Actions\VehicleIdentificationRecords\ImportManagementCertificateAnalysis;
 use App\Models\CertificateDocument;
 use App\Models\MotorcycleSerialRequest;
+use App\Models\MsCertificado;
 use App\Models\User;
 use App\Models\VehicleIdentificationRecordCertificateSerial;
 use App\Models\VehicleIdentificationRecordManagement;
@@ -112,6 +112,8 @@ test('users with edit permission can update management status before importing',
         ->assertSee('Solicitud relacionada')
         ->assertSee('Fecha de creación')
         ->assertDontSee('Finalizar')
+        ->assertSee('Parcialmente en proceso')
+        ->assertDontSee('>En proceso<', false)
         ->call('setStatus', VehicleIdentificationRecordManagementStatus::InProgress->value)
         ->call('save')
         ->assertHasNoErrors();
