@@ -26,6 +26,9 @@ new class extends Component
     public string $status = 'draft';
     public string $nivSearch = '';
     public array $selectedIds = [];
+    /** @var list<array{niv: string, product_id: int|null, product_name: string|null, first_value: string|null, second_value: string|null, product_niv: string, year: int|null}> */
+    #[Locked]
+    public array $uncertifiedRecords = [];
     public mixed $importPdf = null;
     public bool $showFinalizeConfirmation = false;
     public ?string $statusMessage = null;
@@ -37,10 +40,24 @@ new class extends Component
         $this->dispatchId = $dispatchId;
 
         if ($dispatchId !== null) {
-            $dispatch = Dispatch::query()->with('lines:id,dispatch_id,ms_certificado_id')->findOrFail($dispatchId);
+            $dispatch = Dispatch::query()
+                ->with([
+                    'lines:id,dispatch_id,ms_certificado_id',
+                    'uncertifiedLines.product:id,name,first_value,second_value,niv,year',
+                ])
+                ->findOrFail($dispatchId);
             $this->name = $dispatch->name;
             $this->status = $dispatch->status->value;
             $this->selectedIds = $dispatch->lines->pluck('ms_certificado_id')->map(fn ($id) => (int) $id)->all();
+            $this->uncertifiedRecords = $dispatch->uncertifiedLines->map(fn ($line): array => [
+                'niv' => $line->niv,
+                'product_id' => $line->product_id,
+                'product_name' => $line->product?->name,
+                'first_value' => $line->product?->first_value,
+                'second_value' => $line->product?->second_value,
+                'product_niv' => $line->product?->niv ?? substr($line->niv, 3, 2),
+                'year' => $line->product?->year,
+            ])->all();
         }
     }
 
@@ -152,6 +169,14 @@ new class extends Component
             }
 
             $this->selectedIds = array_values(array_unique($this->selectedIds));
+            $existingUncertifiedNivs = collect($this->uncertifiedRecords)->pluck('niv')->flip();
+
+            foreach ($result['notFoundRecords'] as $record) {
+                if (! $existingUncertifiedNivs->has($record['niv'])) {
+                    $this->uncertifiedRecords[] = $record;
+                    $existingUncertifiedNivs->put($record['niv'], true);
+                }
+            }
 
             if ($this->name === '' && $result['dispatchName'] !== null) {
                 $this->name = $result['dispatchName'];
@@ -213,7 +238,7 @@ new class extends Component
     {
         $this->authorizeEdit();
 
-        if ($this->selectedIds === []) {
+        if ($this->selectedIds === [] && $this->uncertifiedRecords === []) {
             $this->addError('selectedIds', 'Agrega al menos un NIV antes de finalizar.');
             return;
         }
@@ -252,14 +277,19 @@ new class extends Component
 
         $validated = $this->validate([
             'name' => ['required', 'string', 'max:255', Rule::unique('dispatches', 'name')->ignore($this->dispatchId)],
-            'selectedIds' => ['required', 'array', 'min:1'],
+            'selectedIds' => ['array'],
             'selectedIds.*' => ['integer', 'distinct', 'exists:ms_certificados,id'],
+            'uncertifiedRecords' => ['array'],
+            'uncertifiedRecords.*.niv' => ['required', 'string', 'size:17', 'distinct'],
+            'uncertifiedRecords.*.product_id' => ['nullable', 'integer', 'exists:products,id'],
         ], [
             'name.required' => 'Ingresa el nombre del despacho generado en Odoo.',
             'name.unique' => 'Ya existe un despacho con ese nombre de Odoo.',
-            'selectedIds.required' => 'Agrega al menos un NIV.',
-            'selectedIds.min' => 'Agrega al menos un NIV.',
         ]);
+
+        if ($validated['selectedIds'] === [] && $validated['uncertifiedRecords'] === []) {
+            throw new RuntimeException('Agrega al menos un NIV certificado o sin certificado.');
+        }
 
         $availableCount = MsCertificado::query()
             ->whereKey($validated['selectedIds'])
@@ -291,6 +321,14 @@ new class extends Component
                 fn (int $id): array => ['ms_certificado_id' => $id],
                 $validated['selectedIds'],
             ));
+            $dispatch->uncertifiedLines()->delete();
+            $dispatch->uncertifiedLines()->createMany(array_map(
+                fn (array $record): array => [
+                    'product_id' => $record['product_id'],
+                    'niv' => $record['niv'],
+                ],
+                $validated['uncertifiedRecords'],
+            ));
             $this->dispatchId = $dispatch->id;
             unset($this->dispatchRecord);
 
@@ -311,7 +349,7 @@ new class extends Component
     <div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <a href="{{ route('dispatches.index') }}" class="font-semibold text-indigo-600 hover:text-indigo-500">← Volver a la lista</a>
         <div class="flex flex-wrap justify-end gap-3">
-            @if ($this->dispatchId !== null && $this->selectedIds !== [] && auth()->user()->hasPermission(UserPermission::ViewDispatches) && $this->isDone())
+            @if ($this->dispatchId !== null && $this->selectedIds !== [] && auth()->user()->hasPermission(UserPermission::ViewDispatches))
                 <a href="{{ route('dispatches.certificates.print', $this->dispatchId) }}" class="inline-flex items-center justify-center gap-2 rounded-xl border border-indigo-200 bg-white px-5 py-3 font-semibold text-indigo-700 transition hover:bg-indigo-50 dark:border-indigo-500/30 dark:bg-transparent dark:text-indigo-300">
                     <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M6.72 13.83a4.4 4.4 0 0 1-.98-3.08 4.4 4.4 0 0 1 4.65-4.28c1.96.15 3.52 1.5 4.32 3.43.58-1.03 1.62-1.67 2.81-1.7a3.02 3.02 0 0 1 3.02 3.4c-.16 1.42-1.3 2.55-2.72 2.62H7.07a2.44 2.44 0 0 1-.35-3.39Z"/>
@@ -435,6 +473,36 @@ new class extends Component
                         @endforelse
                     </tbody>
                 </table>
+            </div>
+
+            <div class="mt-8">
+                <div class="mb-5">
+                    <h3 class="text-xl font-semibold">NIV sin certificado</h3>
+                    <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Seriales del PDF que no existen en el Maestro de Seriales Certificados. El producto se reconoce mediante el código NIV del maestro de productos. {{ count($uncertifiedRecords) }} encontrados.</p>
+                </div>
+
+                <div class="max-h-[32rem] overflow-auto rounded-2xl border border-amber-200 dark:border-amber-500/20">
+                    <table class="w-full min-w-3xl text-left text-sm">
+                        <thead class="sticky top-0 z-10 bg-amber-50 text-xs uppercase text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+                            <tr>
+                                <th class="px-4 py-3">NIV</th>
+                                <th class="px-4 py-3">Producto</th>
+                                <th class="px-4 py-3">Certificado</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-amber-100 dark:divide-amber-500/10">
+                            @forelse ($uncertifiedRecords as $record)
+                                <tr wire:key="dispatch-uncertified-record-{{ $record['niv'] }}" class="bg-amber-50/30 dark:bg-amber-500/5">
+                                    <td class="px-4 py-3 font-mono font-semibold">{{ $record['niv'] }}</td>
+                                    <td class="px-4 py-3 font-semibold">{{ $record['product_name'] ?? 'Producto no identificado' }}</td>
+                                    <td class="px-4 py-3"><span class="inline-flex rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800 dark:bg-amber-500/15 dark:text-amber-200">Sin certificado</span></td>
+                                </tr>
+                            @empty
+                                <tr><td colspan="3" class="px-6 py-12 text-center text-slate-500">No hay NIV sin certificado en este despacho.</td></tr>
+                            @endforelse
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>

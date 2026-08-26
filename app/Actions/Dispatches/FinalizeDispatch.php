@@ -22,7 +22,7 @@ class FinalizeDispatch
 
             $ids = $dispatch->lines()->pluck('ms_certificado_id');
 
-            if ($ids->isEmpty()) {
+            if ($ids->isEmpty() && ! $dispatch->uncertifiedLines()->exists()) {
                 throw new RuntimeException('El despacho debe tener al menos un NIV.');
             }
 
@@ -36,10 +36,12 @@ class FinalizeDispatch
                 throw new RuntimeException('Uno o más NIV ya no están disponibles para despachar. Actualiza el formulario.');
             }
 
-            MsCertificado::query()->whereKey($ids)->update([
-                'status' => CertificateStatus::Dispatched,
-                'updated_at' => now(),
-            ]);
+            if ($ids->isNotEmpty()) {
+                MsCertificado::query()->whereKey($ids)->update([
+                    'status' => CertificateStatus::Dispatched,
+                    'updated_at' => now(),
+                ]);
+            }
             $dispatch->update([
                 'status' => DispatchStatus::Done,
                 'dispatch_date' => now()->toDateString(),

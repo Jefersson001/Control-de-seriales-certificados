@@ -6,6 +6,7 @@ use App\DispatchStatus;
 use App\Models\CertificateDocument;
 use App\Models\Dispatch;
 use App\Models\MsCertificado;
+use App\Models\Product;
 use App\Models\ProductReturn;
 use App\Models\User;
 use App\ReturnStatus;
@@ -303,7 +304,7 @@ test('a dispatch imports pending nivs and the odoo name from a PDF', function ()
         ->assertSet('selectedIds', [$first->id, $second->id])
         ->assertSee('8YZBXMEA1TD008280')
         ->assertSee('8YZBXMEA7TD008283')
-        ->assertDontSee('8YZBXMEA5TD008265');
+        ->assertSee('8YZBXMEA5TD008265');
 
     expect($dispatched->refresh()->status)->toBe(CertificateStatus::Dispatched);
 });
@@ -329,6 +330,13 @@ test('a dispatch pdf import keeps an existing odoo name', function () {
 
 test('a dispatch pdf import reports serials not found in the master', function () {
     $administrator = User::factory()->create(['role' => UserRole::Admin]);
+    $product = Product::factory()->create([
+        'name' => 'BR 200 Negro',
+        'first_value' => 'BR200',
+        'second_value' => 'NEGRO',
+        'niv' => 'BX',
+        'year' => 2026,
+    ]);
     $content = makeCertificatePdf([
         'PLM-PT-LM/OUT/166202',
         'Producto Lote/N de serie Entregado',
@@ -342,8 +350,45 @@ test('a dispatch pdf import reports serials not found in the master', function (
         ->call('importDispatchPdf')
         ->assertHasNoErrors()
         ->assertSet('selectedIds', [])
+        ->assertSet('uncertifiedRecords.0.niv', '8YZBXMEA1TD008280')
+        ->assertSet('uncertifiedRecords.0.product_id', $product->id)
+        ->assertSet('uncertifiedRecords.0.product_name', 'BR 200 Negro')
         ->assertSee('1 no existen en el maestro de seriales')
-        ->assertSee('8YZBXMEA1TD008280');
+        ->assertSee('8YZBXMEA1TD008280')
+        ->assertSee('NIV sin certificado')
+        ->assertSee('Sin certificado')
+        ->assertDontSee('BR200')
+        ->assertDontSee('NEGRO')
+        ->assertDontSee('2026')
+        ->assertDontSeeHtml('>Código NIV<');
+});
+
+test('a dispatch persists and finalizes serials without certificates', function () {
+    $administrator = User::factory()->create(['role' => UserRole::Admin]);
+    $product = Product::factory()->create(['name' => 'BR 200 Negro', 'niv' => 'BX']);
+    $content = makeCertificatePdf([
+        'PLM-PT-LM/OUT/166203',
+        '[BR200BR212604] BR 200 (NEGRO) 8YZBXMEA1TD008280 1,00 Unidades',
+    ]);
+
+    $this->actingAs($administrator);
+
+    Livewire::test('dispatch-form')
+        ->set('importPdf', UploadedFile::fake()->createWithContent('carga.pdf', $content))
+        ->call('importDispatchPdf')
+        ->assertHasNoErrors()
+        ->call('openFinalizeConfirmation')
+        ->assertSet('showFinalizeConfirmation', true)
+        ->call('finalize')
+        ->assertHasNoErrors();
+
+    $dispatch = Dispatch::query()->with('uncertifiedLines')->sole();
+
+    expect($dispatch->status)->toBe(DispatchStatus::Done)
+        ->and($dispatch->lines)->toBeEmpty()
+        ->and($dispatch->uncertifiedLines)->toHaveCount(1)
+        ->and($dispatch->uncertifiedLines->first()->niv)->toBe('8YZBXMEA1TD008280')
+        ->and($dispatch->uncertifiedLines->first()->product_id)->toBe($product->id);
 });
 
 test('a dispatch pdf import reports serials that were already dispatched', function () {

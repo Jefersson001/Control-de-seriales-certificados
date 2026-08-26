@@ -4,6 +4,7 @@ namespace App\Actions\Dispatches;
 
 use App\CertificateStatus;
 use App\Models\MsCertificado;
+use App\Models\Product;
 use Illuminate\Support\Str;
 use RuntimeException;
 use Smalot\PdfParser\Config;
@@ -18,6 +19,7 @@ class ImportDispatchPdf
      *     dispatchName: ?string,
      *     detected: int,
      *     notFound: list<string>,
+     *     notFoundRecords: list<array{niv: string, product_id: int|null, product_name: string|null, first_value: string|null, second_value: string|null, product_niv: string, year: int|null}>,
      *     alreadyDispatched: list<string>
      * }
      */
@@ -60,6 +62,7 @@ class ImportDispatchPdf
             $nivList,
             fn (string $niv): bool => ! array_key_exists($niv, $foundByNiv),
         ));
+        $notFoundRecords = $this->buildNotFoundRecords($notFound);
         $alreadyDispatched = array_values(array_filter(
             $nivList,
             fn (string $niv): bool => array_key_exists($niv, $foundByNiv)
@@ -75,8 +78,42 @@ class ImportDispatchPdf
             'dispatchName' => $this->extractDispatchName($text),
             'detected' => count($nivList),
             'notFound' => $notFound,
+            'notFoundRecords' => $notFoundRecords,
             'alreadyDispatched' => $alreadyDispatched,
         ];
+    }
+
+    /**
+     * @param  list<string>  $nivs
+     * @return list<array{niv: string, product_id: int|null, product_name: string|null, first_value: string|null, second_value: string|null, product_niv: string, year: int|null}>
+     */
+    private function buildNotFoundRecords(array $nivs): array
+    {
+        $productCodes = collect($nivs)
+            ->map(fn (string $niv): string => Str::upper(Str::substr($niv, 3, 2)))
+            ->unique()
+            ->values();
+        $productsByNiv = Product::query()
+            ->whereNotNull('niv')
+            ->orderBy('id')
+            ->get(['id', 'name', 'first_value', 'second_value', 'niv', 'year'])
+            ->filter(fn (Product $product): bool => $productCodes->contains(Str::upper(trim((string) $product->niv))))
+            ->groupBy(fn (Product $product): string => Str::upper(trim((string) $product->niv)));
+
+        return collect($nivs)->map(function (string $niv) use ($productsByNiv): array {
+            $productCode = Str::upper(Str::substr($niv, 3, 2));
+            $product = $productsByNiv->get($productCode)?->first();
+
+            return [
+                'niv' => $niv,
+                'product_id' => $product?->id,
+                'product_name' => $product?->name,
+                'first_value' => $product?->first_value,
+                'second_value' => $product?->second_value,
+                'product_niv' => $productCode,
+                'year' => $product?->year,
+            ];
+        })->all();
     }
 
     private function extractDispatchName(string $text): ?string

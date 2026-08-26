@@ -23,6 +23,11 @@ class Dispatch extends Model
         return $this->hasMany(DispatchLine::class);
     }
 
+    public function uncertifiedLines(): HasMany
+    {
+        return $this->hasMany(DispatchUncertifiedLine::class);
+    }
+
     protected function casts(): array
     {
         return [
