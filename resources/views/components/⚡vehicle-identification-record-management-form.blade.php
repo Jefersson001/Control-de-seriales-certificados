@@ -38,7 +38,7 @@ new class extends Component
     #[Locked]
     public ?int $certificatePendingDeletionId = null;
 
-    /** @var list<array{id: int, control_number: string, original_file_name: string, analyzed_at: string|null}> */
+    /** @var list<array{id: int, control_number: string, original_file_name: string, analyzed_at: string|null, can_delete: bool}> */
     #[Locked]
     public array $certificates = [];
 
@@ -221,8 +221,10 @@ new class extends Component
         }
     }
 
-    public function importCertificateSelection(ImportManagementCertificateAnalysis $importer): void
-    {
+    public function importCertificateSelection(
+        ImportManagementCertificateAnalysis $importer,
+        ProcessManagementCertificates $processor,
+    ): void {
         abort_unless(auth()->user()?->hasPermission(UserPermission::ImportCertificates), 403);
         abort_if($this->persistedDone, 403);
 
@@ -248,23 +250,28 @@ new class extends Component
             $this->includeUnexpected,
             $this->includeMissing,
         );
-        $this->status = VehicleIdentificationRecordManagementStatus::Done->value;
-        $this->persistedDone = true;
+        $this->status = $result['status'];
+        $this->persistedDone = $result['status'] === VehicleIdentificationRecordManagementStatus::Done->value;
         unset($this->management);
+        $this->applyCertificateSummary($processor->summary($this->management));
+
+        $managementStatusMessage = $this->persistedDone
+            ? 'La gestión fue completada automáticamente.'
+            : 'La gestión continúa parcialmente en proceso y admite nuevos certificados.';
 
         session()->flash(
             'managementCertificateImportResult',
-            "Se importaron {$result['imported']} registros al maestro ({$result['certified']} certificados, {$result['duplicates']} duplicados, {$result['unexpected']} no solicitados, {$result['missing']} sin certificar y {$result['invalid']} inválidos). {$result['skipped']} registros fueron omitidos.",
+            "Se importaron {$result['imported']} registros al maestro ({$result['certified']} certificados, {$result['duplicates']} duplicados, {$result['unexpected']} no solicitados, {$result['missing']} sin certificar y {$result['invalid']} inválidos). {$result['skipped']} registros fueron omitidos. {$result['imported_requested']} de {$result['expected_requested']} seriales solicitados están certificados e importados. {$managementStatusMessage}",
         );
     }
 
     public function selectedCertificateImportCount(): int
     {
-        return ($this->includeCertified ? count($this->matchedSerials) : 0)
-            + ($this->includeDuplicates ? collect($this->duplicateSerials)->sum('occurrences') : 0)
-            + ($this->includeUnexpected ? collect($this->unexpectedSerials)->sum('occurrences') : 0)
+        return ($this->includeCertified ? collect($this->matchedSerials)->where('imported', false)->count() : 0)
+            + ($this->includeDuplicates ? collect($this->duplicateSerials)->where('imported', false)->sum('occurrences') : 0)
+            + ($this->includeUnexpected ? collect($this->unexpectedSerials)->where('imported', false)->sum('occurrences') : 0)
             + ($this->includeMissing ? count($this->missingSerials) : 0)
-            + ($this->includeInvalid ? collect($this->invalidPdfRows)->sum('occurrences') : 0);
+            + ($this->includeInvalid ? collect($this->invalidPdfRows)->where('imported', false)->sum('occurrences') : 0);
     }
 
     public function downloadCertificate(int $certificateId): mixed
@@ -283,6 +290,7 @@ new class extends Component
 
         VehicleIdentificationRecordManagementCertificate::query()
             ->where('management_id', $this->managementId)
+            ->whereDoesntHave('serialResults', fn ($query) => $query->whereNotNull('imported_at'))
             ->findOrFail($certificateId);
 
         $this->certificatePendingDeletionId = $certificateId;
@@ -304,6 +312,7 @@ new class extends Component
 
         $certificate = VehicleIdentificationRecordManagementCertificate::query()
             ->where('management_id', $this->managementId)
+            ->whereDoesntHave('serialResults', fn ($query) => $query->whereNotNull('imported_at'))
             ->findOrFail($this->certificatePendingDeletionId);
 
         $deleter->handle($certificate);
@@ -494,7 +503,7 @@ new class extends Component
                                 <div class="min-w-0"><p class="truncate font-mono font-semibold">{{ $certificate['control_number'] }}</p><p class="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">{{ $certificate['original_file_name'] }} · {{ $certificate['analyzed_at'] }}</p></div>
                                 <div class="flex shrink-0 items-center gap-2">
                                     <button wire:click="downloadCertificate({{ $certificate['id'] }})" type="button" class="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-white dark:border-white/15 dark:text-slate-200 dark:hover:bg-white/5">Descargar PDF</button>
-                                    @if ($this->canEdit())
+                                    @if ($this->canEdit() && $certificate['can_delete'])
                                         <button wire:click="openDeleteCertificateConfirmation({{ $certificate['id'] }})" type="button" class="rounded-lg border border-rose-300 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-50 dark:border-rose-500/30 dark:text-rose-300 dark:hover:bg-rose-500/10">Quitar</button>
                                     @endif
                                 </div>

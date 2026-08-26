@@ -3,6 +3,7 @@
 namespace App\Actions\VehicleIdentificationRecords;
 
 use App\Actions\Certificates\StoreCertificateDocument;
+use App\Models\MotorcycleSerialRequestLineSerial;
 use App\Models\MsCertificado;
 use App\Models\VehicleIdentificationRecordCertificateSerial;
 use App\Models\VehicleIdentificationRecordManagement;
@@ -20,7 +21,7 @@ class ImportManagementCertificateAnalysis
         private StoreCertificateDocument $certificateDocumentStore,
     ) {}
 
-    /** @return array{imported: int, certified: int, duplicates: int, unexpected: int, missing: int, invalid: int, skipped: int} */
+    /** @return array{imported: int, certified: int, duplicates: int, unexpected: int, missing: int, invalid: int, skipped: int, certificate_documents: int, imported_requested: int, expected_requested: int, status: string} */
     public function handle(
         VehicleIdentificationRecordManagement $management,
         bool $includeCertified,
@@ -159,9 +160,22 @@ class ImportManagementCertificateAnalysis
                     ->whereIn('id', $processedResultIds)
                     ->update(['imported_at' => now()]);
 
-                $management->update([
-                    'status' => VehicleIdentificationRecordManagementStatus::Done,
-                ]);
+                $expectedRequested = MotorcycleSerialRequestLineSerial::query()
+                    ->whereHas('line', fn ($query) => $query
+                        ->where('motorcycle_serial_request_id', $management->motorcycle_serial_request_id))
+                    ->count();
+                $importedRequested = VehicleIdentificationRecordCertificateSerial::query()
+                    ->whereHas('certificate', fn ($query) => $query->where('management_id', $management->id))
+                    ->where('classification', VehicleIdentificationRecordCertificateSerialClassification::Certified)
+                    ->whereNotNull('request_serial_id')
+                    ->whereNotNull('imported_at')
+                    ->distinct()
+                    ->count('request_serial_id');
+                $status = $expectedRequested > 0 && $importedRequested === $expectedRequested
+                    ? VehicleIdentificationRecordManagementStatus::Done
+                    : VehicleIdentificationRecordManagementStatus::InProgress;
+
+                $management->update(['status' => $status]);
 
                 $storedCertificateDocuments = 0;
 
@@ -185,6 +199,9 @@ class ImportManagementCertificateAnalysis
                 return [
                     'imported' => count($rows),
                     'certificate_documents' => $storedCertificateDocuments,
+                    'imported_requested' => $importedRequested,
+                    'expected_requested' => $expectedRequested,
+                    'status' => $status->value,
                     ...$counts,
                 ];
             }),

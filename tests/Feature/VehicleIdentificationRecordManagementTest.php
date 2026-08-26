@@ -2,6 +2,7 @@
 
 use App\Actions\Certificates\ImportCertificatesFromPdf;
 use App\Actions\VehicleIdentificationRecords\CompareRequestSerialsWithPdf;
+use App\Actions\VehicleIdentificationRecords\DeleteManagementCertificate;
 use App\Actions\VehicleIdentificationRecords\ExportManagementCertificateAnalysis;
 use App\Actions\VehicleIdentificationRecords\HydrateManagementCertificateSourceData;
 use App\Actions\VehicleIdentificationRecords\ImportManagementCertificateAnalysis;
@@ -429,6 +430,92 @@ test('certificates are accumulated through independent requests', function () {
     expect($management->certificates()->count())->toBe(2);
 });
 
+test('certified serials can be imported partially until the complete request is fulfilled', function () {
+    Storage::fake('local');
+    $administrator = User::factory()->create(['role' => UserRole::Admin]);
+    $management = VehicleIdentificationRecordManagement::factory()->create();
+    $line = $management->motorcycleSerialRequest->lines()->firstOrFail();
+    $line->serialEntries()->delete();
+    $line->serialEntries()->createMany([
+        ['serial' => '8YZC7MCC0TD000001'],
+        ['serial' => '8YZC7MCC0TD000002'],
+        ['serial' => '8YZC7MCC0TD000003'],
+    ]);
+    $sourceRecord = [
+        'no' => '1',
+        'marca' => 'BERA',
+        'modelo' => 'BR 150 BRF',
+        'tipo' => 'MOTOCICLETA',
+        'fabricacion' => '2026',
+        'anio' => 2026,
+        'codigo' => 'DG-NIV-RG5-PARCIAL',
+    ];
+    $extractor = Mockery::mock(ImportCertificatesFromPdf::class);
+    $extractor->shouldReceive('parseForComparison')->twice()->andReturn(
+        [
+            'controlNumber' => 'DG-NIV-RG5-PARCIAL-1',
+            'records' => [[...$sourceRecord, 'niv' => '8YZC7MCC0TD000001']],
+            'invalidCount' => 0,
+            'invalidRows' => [],
+        ],
+        [
+            'controlNumber' => 'DG-NIV-RG5-PARCIAL-2',
+            'records' => [
+                [...$sourceRecord, 'no' => '2', 'niv' => '8YZC7MCC0TD000002'],
+                [...$sourceRecord, 'no' => '3', 'niv' => '8YZC7MCC0TD000003'],
+            ],
+            'invalidCount' => 0,
+            'invalidRows' => [],
+        ],
+    );
+    app()->instance(ImportCertificatesFromPdf::class, $extractor);
+
+    $this->actingAs($administrator);
+
+    Livewire::test('vehicle-identification-record-management-form', ['managementId' => $management->id])
+        ->set('pdfFiles', [UploadedFile::fake()->createWithContent('parcial-uno.pdf', '%PDF-partial-one')])
+        ->call('processNextPdf')
+        ->assertHasNoErrors()
+        ->call('importCertificateSelection')
+        ->assertHasNoErrors()
+        ->assertSet('status', VehicleIdentificationRecordManagementStatus::InProgress->value)
+        ->assertSet('persistedDone', false)
+        ->assertSet('certificates.0.can_delete', false)
+        ->assertSee('1 de 3 seriales solicitados están certificados e importados')
+        ->assertSee('Seleccionar PDF');
+
+    expect(MsCertificado::query()->pluck('niv')->all())->toBe(['8YZC7MCC0TD000001'])
+        ->and($management->refresh()->status)->toBe(VehicleIdentificationRecordManagementStatus::InProgress)
+        ->and(CertificateDocument::query()->count())->toBe(1);
+
+    $importedCertificate = $management->certificates()->sole();
+
+    expect(fn () => app(DeleteManagementCertificate::class)
+        ->handle($importedCertificate))
+        ->toThrow(RuntimeException::class, 'No se puede quitar un certificado que ya fue importado al maestro.');
+
+    Livewire::test('vehicle-identification-record-management-form', ['managementId' => $management->id])
+        ->assertSet('persistedDone', false)
+        ->set('pdfFiles', [UploadedFile::fake()->createWithContent('parcial-dos.pdf', '%PDF-partial-two')])
+        ->call('processNextPdf')
+        ->assertHasNoErrors()
+        ->assertSet('exactPdfMatch', true)
+        ->call('importCertificateSelection')
+        ->assertHasNoErrors()
+        ->assertSet('status', VehicleIdentificationRecordManagementStatus::Done->value)
+        ->assertSet('persistedDone', true)
+        ->assertSee('3 de 3 seriales solicitados están certificados e importados')
+        ->assertDontSee('Seleccionar PDF');
+
+    expect(MsCertificado::query()->orderBy('niv')->pluck('niv')->all())->toBe([
+        '8YZC7MCC0TD000001',
+        '8YZC7MCC0TD000002',
+        '8YZC7MCC0TD000003',
+    ])->and($management->refresh()->status)->toBe(VehicleIdentificationRecordManagementStatus::Done)
+        ->and($management->certificates()->count())->toBe(2)
+        ->and(CertificateDocument::query()->count())->toBe(2);
+});
+
 test('certificate analysis exports and imports only selectable categories', function () {
     Storage::fake('local');
     $administrator = User::factory()->create(['role' => UserRole::Admin]);
@@ -510,13 +597,13 @@ test('certificate analysis exports and imports only selectable categories', func
         ->call('importCertificateSelection')
         ->assertHasNoErrors()
         ->assertSee('Se importaron 4 registros al maestro')
-        ->assertSet('persistedDone', true)
-        ->assertSet('status', VehicleIdentificationRecordManagementStatus::Done->value)
-        ->assertDontSee('Importar seleccionados');
+        ->assertSet('persistedDone', false)
+        ->assertSet('status', VehicleIdentificationRecordManagementStatus::InProgress->value)
+        ->assertSee('Importar seleccionados');
 
     expect(MsCertificado::query()->count())->toBe(4)
         ->and(MsCertificado::query()->where('niv', '8YZC7MCC0TD999999')->exists())->toBeFalse()
-        ->and($management->refresh()->status)->toBe(VehicleIdentificationRecordManagementStatus::Done)
+        ->and($management->refresh()->status)->toBe(VehicleIdentificationRecordManagementStatus::InProgress)
         ->and(CertificateDocument::query()->count())->toBe(1)
         ->and(CertificateDocument::query()->sole()->managements()->whereKey($management->id)->exists())->toBeTrue();
 

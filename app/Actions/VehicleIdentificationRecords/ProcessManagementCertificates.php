@@ -4,7 +4,6 @@ namespace App\Actions\VehicleIdentificationRecords;
 
 use App\Actions\Certificates\ImportCertificatesFromPdf;
 use App\Models\VehicleIdentificationRecordManagement;
-use App\Models\VehicleIdentificationRecordManagementCertificate;
 use App\VehicleIdentificationRecordCertificateSerialClassification;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -183,6 +182,7 @@ class ProcessManagementCertificates
                 'classification' => $result->classification->value,
                 'certificate_id' => $certificate->id,
                 'certificate' => $certificate->control_number,
+                'imported' => $result->imported_at !== null,
                 'requested' => (bool) ($result->source_data['_requested']
                     ?? ! str_contains($result->reason ?? '', 'no solicitado')),
             ]);
@@ -210,6 +210,9 @@ class ProcessManagementCertificates
                 'control_number' => $certificate->control_number,
                 'original_file_name' => $certificate->original_file_name,
                 'analyzed_at' => $certificate->analyzed_at?->format('d/m/Y H:i'),
+                'can_delete' => $certificate->serialResults->every(
+                    fn ($result): bool => $result->imported_at === null,
+                ),
             ])->all(),
             'expectedCount' => $expected->count(),
             'pdfOccurrenceCount' => $management->certificates->sum('valid_occurrence_count'),

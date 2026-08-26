@@ -2,17 +2,22 @@
 
 namespace App\Actions\VehicleIdentificationRecords;
 
-use App\Models\VehicleIdentificationRecordManagementCertificate;
 use App\Models\VehicleIdentificationRecordCertificateSerial;
+use App\Models\VehicleIdentificationRecordManagementCertificate;
 use App\VehicleIdentificationRecordCertificateSerialClassification;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use RuntimeException;
 
 class DeleteManagementCertificate
 {
     public function handle(VehicleIdentificationRecordManagementCertificate $certificate): void
     {
+        if ($certificate->serialResults()->whereNotNull('imported_at')->exists()) {
+            throw new RuntimeException('No se puede quitar un certificado que ya fue importado al maestro.');
+        }
+
         $filePath = $certificate->file_path;
 
         DB::transaction(function () use ($certificate): void {
