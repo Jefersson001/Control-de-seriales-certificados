@@ -6,6 +6,7 @@ use App\Http\Controllers\CertificateDocumentDownloadController;
 use App\Http\Controllers\CertificateExportController;
 use App\Http\Controllers\DispatchCertificatePrintController;
 use App\Http\Controllers\DispatchController;
+use App\Http\Controllers\DispatchUncertifiedSerialPrintController;
 use App\Http\Controllers\MotorcycleSerialRequestController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\ProductExportController;
@@ -37,6 +38,9 @@ Route::get('/despacho/{dispatch}', [DispatchController::class, 'edit'])
 Route::get('/despacho/{dispatch}/imprimir-certificados', DispatchCertificatePrintController::class)
     ->middleware(['auth', 'password.not_expired', 'permission:dispatches.view'])
     ->name('dispatches.certificates.print');
+Route::get('/despacho/{dispatch}/imprimir-seriales-no-certificados', DispatchUncertifiedSerialPrintController::class)
+    ->middleware(['auth', 'password.not_expired', 'permission:dispatches.view'])
+    ->name('dispatches.uncertified_serials.print');
 Route::get('/devoluciones', [ReturnController::class, 'index'])
     ->middleware(['auth', 'password.not_expired', 'permission:returns.view'])
     ->name('returns.index');

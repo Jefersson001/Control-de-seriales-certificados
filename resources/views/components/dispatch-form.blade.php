@@ -66,7 +66,10 @@ new class extends Component
     {
         return $this->dispatchId === null
             ? null
-            : Dispatch::query()->with('creator:id,name')->findOrFail($this->dispatchId);
+            : Dispatch::query()
+                ->with('creator:id,name')
+                ->withCount('uncertifiedLines')
+                ->findOrFail($this->dispatchId);
     }
 
     public function isDone(): bool
@@ -81,6 +84,16 @@ new class extends Component
         abort_if($newStatus === null || $newStatus === DispatchStatus::Done, 422);
 
         $this->status = $newStatus->value;
+    }
+
+    public function showNoUncertifiedSerialsAlert(): void
+    {
+        abort_unless($this->dispatchId !== null && $this->isDone(), 403);
+        abort_unless(auth()->user()?->hasPermission(UserPermission::ViewDispatches), 403);
+
+        if (Dispatch::query()->findOrFail($this->dispatchId)->uncertifiedLines()->doesntExist()) {
+            $this->statusMessage = 'Este despacho no tiene seriales sin certificar.';
+        }
     }
 
     #[Computed]
@@ -349,7 +362,7 @@ new class extends Component
     <div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <a href="{{ route('dispatches.index') }}" class="font-semibold text-indigo-600 hover:text-indigo-500">← Volver a la lista</a>
         <div class="flex flex-wrap justify-end gap-3">
-            @if ($this->dispatchId !== null && $this->selectedIds !== [] && auth()->user()->hasPermission(UserPermission::ViewDispatches))
+            @if ($this->dispatchId !== null && $this->selectedIds !== [] && auth()->user()->hasPermission(UserPermission::ViewDispatches) && $this->isDone())
                 <a href="{{ route('dispatches.certificates.print', $this->dispatchId) }}" class="inline-flex items-center justify-center gap-2 rounded-xl border border-indigo-200 bg-white px-5 py-3 font-semibold text-indigo-700 transition hover:bg-indigo-50 dark:border-indigo-500/30 dark:bg-transparent dark:text-indigo-300">
                     <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M6.72 13.83a4.4 4.4 0 0 1-.98-3.08 4.4 4.4 0 0 1 4.65-4.28c1.96.15 3.52 1.5 4.32 3.43.58-1.03 1.62-1.67 2.81-1.7a3.02 3.02 0 0 1 3.02 3.4c-.16 1.42-1.3 2.55-2.72 2.62H7.07a2.44 2.44 0 0 1-.35-3.39Z"/>
@@ -357,6 +370,25 @@ new class extends Component
                     </svg>
                     Imprimir certificados
                 </a>
+            @endif
+            @if ($this->dispatchId !== null && auth()->user()->hasPermission(UserPermission::ViewDispatches) && $this->isDone())
+                @if (($this->dispatchRecord?->uncertified_lines_count ?? 0) > 0)
+                    <a href="{{ route('dispatches.uncertified_serials.print', $this->dispatchId) }}" class="inline-flex items-center justify-center gap-2 rounded-xl border border-amber-200 bg-white px-5 py-3 font-semibold text-amber-700 transition hover:bg-amber-50 dark:border-amber-500/30 dark:bg-transparent dark:text-amber-300 dark:hover:bg-amber-500/10">
+                        <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M6 3.75h8.25L18 7.5v12.75H6V3.75Z"/>
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M14.25 3.75V7.5H18M9 12h6m-6 3h6"/>
+                        </svg>
+                        Imprimir seriales no certificados
+                    </a>
+                @else
+                    <button wire:click="showNoUncertifiedSerialsAlert" type="button" class="inline-flex items-center justify-center gap-2 rounded-xl border border-amber-200 bg-white px-5 py-3 font-semibold text-amber-700 transition hover:bg-amber-50 dark:border-amber-500/30 dark:bg-transparent dark:text-amber-300 dark:hover:bg-amber-500/10">
+                        <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M6 3.75h8.25L18 7.5v12.75H6V3.75Z"/>
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M14.25 3.75V7.5H18M9 12h6m-6 3h6"/>
+                        </svg>
+                        Imprimir seriales no certificados
+                    </button>
+                @endif
             @endif
             @if (! $this->isDone() && auth()->user()->hasPermission($dispatchId === null ? UserPermission::CreateDispatches : UserPermission::EditDispatches))
                 <button wire:click="save" wire:loading.attr="disabled" wire:target="save" type="button" class="rounded-xl border border-indigo-200 bg-white px-5 py-3 font-semibold text-indigo-700 hover:bg-indigo-50 dark:border-indigo-500/30 dark:bg-transparent dark:text-indigo-300">Guardar</button>
@@ -366,6 +398,7 @@ new class extends Component
     </div>
 
     @if (session('dispatchSaved'))<div class="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 font-semibold text-emerald-800 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200">{{ session('dispatchSaved') }}</div>@endif
+    @if ($statusMessage)<div role="alert" class="mb-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 font-semibold text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200">{{ $statusMessage }}</div>@endif
     @if ($errors->any())<div class="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-rose-800 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-200"><ul class="list-inside list-disc space-y-1">@foreach ($errors->all() as $error)<li>{{ $error }}</li>@endforeach</ul></div>@endif
 
     <div class="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
