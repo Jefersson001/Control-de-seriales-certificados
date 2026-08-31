@@ -4,12 +4,13 @@ namespace App\Actions\Dispatches;
 
 use App\Models\CertificateDocument;
 use App\Models\Dispatch;
+use App\Models\MsCertificado;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use PdfDecompressor\Normalizer;
 use RuntimeException;
 use setasign\Fpdi\Fpdi;
-use Smalot\PdfParser\Parser;
 
 class PrintDispatchCertificates
 {
@@ -21,6 +22,7 @@ class PrintDispatchCertificates
             throw new RuntimeException('El despacho no tiene NIV.');
         }
 
+        /** @var array<string, list<MsCertificado>> $groups */
         $groups = [];
 
         foreach ($lines as $line) {
@@ -36,7 +38,7 @@ class PrintDispatchCertificates
                 continue;
             }
 
-            $groups[$codigo][] = $certificate->niv;
+            $groups[$codigo][] = $certificate;
         }
 
         if ($groups === []) {
@@ -45,7 +47,7 @@ class PrintDispatchCertificates
 
         $pdf = new Fpdi;
 
-        foreach ($groups as $codigo => $serials) {
+        foreach (array_keys($groups) as $codigo) {
             $document = CertificateDocument::query()
                 ->whereRaw('UPPER(TRIM(control_number)) = ?', [$codigo])
                 ->oldest('id')
@@ -57,13 +59,11 @@ class PrintDispatchCertificates
 
             $path = Storage::disk('local')->path($document->file_path);
             $path = $this->normalizePdf($path);
-            $pageNumbers = $this->resolvePages($path, $serials);
             $pdf->setSourceFile($path);
-
-            foreach ($pageNumbers as $pageNumber) {
-                $this->appendImportedPage($pdf, $pageNumber);
-            }
+            $this->appendImportedPage($pdf, 1);
         }
+
+        $this->appendSerialSummary($pdf, $lines->pluck('certificate')->filter()->values());
 
         return $pdf->Output('S');
     }
@@ -87,44 +87,77 @@ class PrintDispatchCertificates
         return $temporaryFile;
     }
 
-    /**
-     * @param  list<string>  $serials
-     * @return list<int>
-     */
-    private function resolvePages(string $path, array $serials): array
+    /** @param Collection<int, MsCertificado> $certificates */
+    private function appendSerialSummary(Fpdi $pdf, Collection $certificates): void
     {
-        $parser = new Parser;
-        $document = $parser->parseFile($path);
-        $normalizedSerials = collect($serials)
-            ->map(fn (string $serial): string => $this->normalize($serial))
-            ->unique();
+        $pdf->SetMargins(10, 10, 10);
+        $pdf->SetAutoPageBreak(true, 15);
+        $pdf->AddPage('P', 'A4');
+        $this->renderSummaryHeading($pdf, $certificates);
+        $this->renderTableHeader($pdf);
 
-        $pages = [];
-
-        foreach ($document->getPages() as $index => $page) {
-            $text = $this->normalize($page->getText());
-
-            if ($text === '') {
-                continue;
+        foreach ($certificates as $certificate) {
+            if ($pdf->GetY() + 7 > 282) {
+                $pdf->AddPage('P', 'A4');
+                $this->renderSummaryHeading($pdf, $certificates);
+                $this->renderTableHeader($pdf);
             }
 
-            foreach ($normalizedSerials as $serial) {
-                if ($serial !== '' && str_contains($text, $serial)) {
-                    $pages[] = $index + 1;
-
-                    break;
-                }
-            }
+            $this->renderCertificateRow($pdf, $certificate);
         }
+    }
 
-        $pageNumbers = array_values(array_unique($pages));
-        sort($pageNumbers);
+    /** @param Collection<int, MsCertificado> $certificates */
+    private function renderSummaryHeading(Fpdi $pdf, Collection $certificates): void
+    {
+        $controlNumbers = $certificates
+            ->pluck('codigo')
+            ->map(fn (string $codigo): string => Str::upper(trim($codigo)))
+            ->unique()
+            ->implode(', ');
 
-        if ($pageNumbers === [] || $pageNumbers[0] !== 1) {
-            array_unshift($pageNumbers, 1);
+        $pdf->SetTextColor(30, 30, 30);
+        $pdf->SetFont('Helvetica', 'B', 11);
+        $pdf->MultiCell(190, 6, $this->encode('NÚMEROS DE CONTROL: '.$controlNumbers));
+        $pdf->SetFont('Helvetica', 'B', 9);
+        $pdf->Cell(190, 5, $this->encode('FABRICADO POR: CORPORACION KURI SAM, C.A.'), 0, 1);
+        $pdf->Cell(190, 5, 'Nro. RIF J-31447419-7', 0, 1);
+        $pdf->Ln(3);
+    }
+
+    private function renderTableHeader(Fpdi $pdf): void
+    {
+        $widths = [8, 21, 25, 20, 20, 13, 38, 45];
+        $labels = ['#', 'Marca', 'Modelo', 'Tipo', 'Fabricación', 'Año', 'NIV', 'Número de control'];
+
+        $pdf->SetFont('Helvetica', 'B', 6.5);
+        $pdf->SetFillColor(224, 228, 233);
+        $pdf->SetDrawColor(150, 156, 165);
+
+        foreach ($labels as $index => $label) {
+            $pdf->Cell($widths[$index], 7, $this->encode($label), 1, $index === array_key_last($labels) ? 1 : 0, 'L', true);
         }
+    }
 
-        return $pageNumbers;
+    private function renderCertificateRow(Fpdi $pdf, MsCertificado $certificate): void
+    {
+        $widths = [8, 21, 25, 20, 20, 13, 38, 45];
+        $values = [
+            $certificate->no,
+            Str::limit($certificate->marca, 13),
+            Str::limit($certificate->modelo, 16),
+            Str::limit($certificate->tipo, 12),
+            Str::limit($certificate->fabricacion, 12),
+            (string) $certificate->anio,
+            $certificate->niv,
+            $certificate->codigo,
+        ];
+
+        $pdf->SetFont('Helvetica', '', 6.5);
+
+        foreach ($values as $index => $value) {
+            $pdf->Cell($widths[$index], 7, $this->encode((string) $value), 1, $index === array_key_last($values) ? 1 : 0);
+        }
     }
 
     private function appendImportedPage(Fpdi $pdf, int $pageNumber): void
@@ -137,8 +170,8 @@ class PrintDispatchCertificates
         $pdf->useImportedPage($templateId);
     }
 
-    private function normalize(string $value): string
+    private function encode(string $value): string
     {
-        return Str::upper(preg_replace('/\s+/u', '', $value) ?? '');
+        return mb_convert_encoding($value, 'Windows-1252', 'UTF-8');
     }
 }

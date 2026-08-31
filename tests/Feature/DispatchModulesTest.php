@@ -550,7 +550,7 @@ test('users without delete permission cannot delete dispatches or returns', func
         ->and(ProductReturn::query()->find($return->id))->not->toBeNull();
 });
 
-test('printing dispatch certificates includes the first page and each serial page', function () {
+test('printing dispatch certificates includes only the first page and a generated serial summary', function () {
     Storage::fake('local');
     $administrator = User::factory()->create(['role' => UserRole::Admin]);
     $serialOne = MsCertificado::factory()->create([
@@ -582,13 +582,16 @@ test('printing dispatch certificates includes the first page and each serial pag
     $result = app(PrintDispatchCertificates::class)->handle($dispatch);
     $texts = pdfPageTexts($result);
 
-    expect($texts)->toHaveCount(3)
+    expect($texts)->toHaveCount(2)
         ->and($texts[0])->toContain('PRIMERA PAGINA')
-        ->and($texts[1])->toContain('SEGUNDA PAGINA')
-        ->and($texts[2])->toContain('TERCERA PAGINA');
+        ->and($texts[1])->toContain('DG-NIV-RG5-0175-PC')
+        ->and($texts[1])->toContain('8YZC7MCC0TD000101')
+        ->and($texts[1])->toContain('8YZC7MCC0TD000102')
+        ->and(implode(' ', $texts))->not->toContain('SEGUNDA PAGINA')
+        ->and(implode(' ', $texts))->not->toContain('TERCERA PAGINA');
 });
 
-test('printing dispatch certificates groups serials per certificate without repeating pages', function () {
+test('printing dispatch certificates lists multiple serials from one certificate in one summary', function () {
     Storage::fake('local');
     $administrator = User::factory()->create(['role' => UserRole::Admin]);
     $serialOne = MsCertificado::factory()->create([
@@ -621,10 +624,12 @@ test('printing dispatch certificates groups serials per certificate without repe
 
     expect($texts)->toHaveCount(2)
         ->and($texts[0])->toContain('PRIMERA PAGINA')
-        ->and($texts[1])->toContain('PAGINA CON DOS SERIALES');
+        ->and($texts[1])->toContain('8YZC7MCC0TD000201')
+        ->and($texts[1])->toContain('8YZC7MCC0TD000202')
+        ->and($texts[1])->not->toContain('PAGINA CON DOS SERIALES');
 });
 
-test('printing dispatch certificates concatenates different certificates in order', function () {
+test('printing dispatch certificates keeps one cover per certificate and creates one consolidated summary', function () {
     Storage::fake('local');
     $administrator = User::factory()->create(['role' => UserRole::Admin]);
     $serialOne = MsCertificado::factory()->create([
@@ -660,11 +665,15 @@ test('printing dispatch certificates concatenates different certificates in orde
     $result = app(PrintDispatchCertificates::class)->handle($dispatch);
     $texts = pdfPageTexts($result);
 
-    expect($texts)->toHaveCount(4)
+    expect($texts)->toHaveCount(3)
         ->and($texts[0])->toContain('PRIMER CERTIFICADO PAG 1')
-        ->and($texts[1])->toContain('PRIMER CERTIFICADO SERIAL')
-        ->and($texts[2])->toContain('SEGUNDO CERTIFICADO PAG 1')
-        ->and($texts[3])->toContain('SEGUNDO CERTIFICADO SERIAL');
+        ->and($texts[1])->toContain('SEGUNDO CERTIFICADO PAG 1')
+        ->and($texts[2])->toContain('DG-NIV-RG5-0175-PC')
+        ->and($texts[2])->toContain('DG-NIV-RG8-0005-PC')
+        ->and($texts[2])->toContain('8YZC7MCC0TD000301')
+        ->and($texts[2])->toContain('8YZC7MCC0TD000302')
+        ->and(implode(' ', $texts))->not->toContain('PRIMER CERTIFICADO SERIAL')
+        ->and(implode(' ', $texts))->not->toContain('SEGUNDO CERTIFICADO SERIAL');
 });
 
 test('printing dispatch certificates normalizes certificates with a compressed xref stream', function () {
@@ -704,7 +713,8 @@ test('printing dispatch certificates normalizes certificates with a compressed x
 
     expect($texts)->toHaveCount(2)
         ->and($texts[0])->toContain('PRIMERA PAGINA COMPRIMIDA')
-        ->and($texts[1])->toContain('SEGUNDA PAGINA COMPRIMIDA');
+        ->and($texts[1])->toContain('8YZC7MCC0TD000701')
+        ->and(implode(' ', $texts))->not->toContain('SEGUNDA PAGINA COMPRIMIDA');
 });
 
 test('printing dispatch certificates throws when the certificate document is missing', function () {
