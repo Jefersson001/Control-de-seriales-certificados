@@ -57,6 +57,7 @@ class ImportCertificatesFromPdf
         $records = [];
         $invalidCount = 0;
         $invalidRows = [];
+        $columnPositions = null;
 
         foreach ($pdf->getPages() as $pageIndex => $page) {
             $positionedText = $page->getDataTm();
@@ -67,7 +68,13 @@ class ImportCertificatesFromPdf
                 continue;
             }
 
-            $pageResult = $this->extractPositionedRecords($positionedText, $controlNumber, $pageIndex + 1);
+            $pageResult = $this->extractPositionedRecords(
+                $positionedText,
+                $controlNumber,
+                $pageIndex + 1,
+                $columnPositions,
+            );
+            $columnPositions = $pageResult['columnPositions'] ?? $columnPositions;
             $records = [...$records, ...$pageResult['records']];
             $invalidCount += $pageResult['invalidCount'];
             $invalidRows = [...$invalidRows, ...$pageResult['invalidRows']];
@@ -141,13 +148,15 @@ class ImportCertificatesFromPdf
      * @return array{
      *     records: list<array{no: string, marca: string, modelo: string, tipo: string, fabricacion: string, anio: int, niv: string, codigo: string}>,
      *     invalidCount: int,
-     *     invalidRows: list<array{page: int|null, no: string, niv: string, values: list<string>, reason: string}>
+     *     invalidRows: list<array{page: int|null, no: string, niv: string, values: list<string>, reason: string}>,
+     *     columnPositions: list<float>|null
      * }
      */
     public function extractPositionedRecords(
         array $positionedText,
         string $controlNumber,
         ?int $pageNumber = null,
+        ?array $fallbackColumnPositions = null,
     ): array {
         $items = collect($positionedText)
             ->map(function (array $item): ?array {
@@ -170,8 +179,18 @@ class ImportCertificatesFromPdf
 
         $header = $this->findHeader($items->all());
 
-        if ($header === null) {
-            return ['records' => [], 'invalidCount' => 0, 'invalidRows' => []];
+        if ($header !== null) {
+            $columnPositions = $header['columns'];
+        } elseif ($fallbackColumnPositions !== null) {
+            $columnPositions = $fallbackColumnPositions;
+            $header = ['y' => PHP_FLOAT_MAX, 'columns' => $columnPositions];
+        } else {
+            return [
+                'records' => [],
+                'invalidCount' => 0,
+                'invalidRows' => [],
+                'columnPositions' => null,
+            ];
         }
 
         $boundaries = [];
@@ -268,7 +287,7 @@ class ImportCertificatesFromPdf
             $records[] = $record;
         }
 
-        return compact('records', 'invalidCount', 'invalidRows');
+        return compact('records', 'invalidCount', 'invalidRows', 'columnPositions');
     }
 
     /**

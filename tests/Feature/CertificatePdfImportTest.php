@@ -204,6 +204,42 @@ test('positioned pdf parsing explains why a detected row is invalid', function (
         ->toContain('Fabricación debe tener cuatro dígitos.');
 });
 
+test('positioned pdf continuation pages reuse the previous column layout when their header is omitted', function () {
+    $extractor = app(ImportCertificatesFromPdf::class);
+    $headers = ['#', 'Marca', 'Modelo', 'Tipo', 'Fabricación', 'Modelo', 'NIV'];
+    $headerPositions = [35, 76, 173, 284, 340, 403, 495];
+    $valuePositions = [40, 76, 164, 263, 353, 408, 459];
+    $firstPage = [];
+
+    foreach ($headers as $index => $header) {
+        $firstPage[] = [[1, 0, 0, 1, $headerPositions[$index], 700], $header];
+    }
+
+    foreach (['64', 'BERA', 'BR 150', 'MOTOCICLETA', '2025', '2026', '8YZC7MCC0TD000064'] as $index => $value) {
+        $firstPage[] = [[1, 0, 0, 1, $valuePositions[$index], 680], $value];
+    }
+
+    $firstResult = $extractor->extractPositionedRecords($firstPage, 'DG-NIV-RG1-0362-PC', 2);
+    $continuationPage = [];
+
+    foreach (['65', 'BERA', 'BR 150', 'MOTOCICLETA', '2025', '2026', '8YZC7MCC2TD000065'] as $index => $value) {
+        $continuationPage[] = [[1, 0, 0, 1, $valuePositions[$index], 680], $value];
+    }
+
+    $continuationResult = $extractor->extractPositionedRecords(
+        $continuationPage,
+        'DG-NIV-RG1-0362-PC',
+        3,
+        $firstResult['columnPositions'],
+    );
+
+    expect($firstResult['records'])->toHaveCount(1)
+        ->and($continuationResult['records'])->toHaveCount(1)
+        ->and($continuationResult['records'][0]['no'])->toBe('65')
+        ->and($continuationResult['records'][0]['niv'])->toBe('8YZC7MCC2TD000065')
+        ->and($continuationResult['invalidRows'])->toBeEmpty();
+});
+
 test('validated continuous values split into pdf fragments are joined without spaces', function () {
     $positionedText = [];
     $headers = ['#', 'Marca', 'Modelo', 'Tipo', 'Fabricación', 'Modelo', 'NIV'];
