@@ -9,6 +9,37 @@ use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
 
+test('certificate report generation defaults to unlimited time', function () {
+    expect(SystemSetting::dispatchCertificateTimeoutSeconds())->toBe(0);
+});
+
+test('administrators can save and reload the certificate report timeout', function (int $seconds) {
+    $administrator = User::factory()->create(['role' => UserRole::Admin]);
+
+    Livewire::actingAs($administrator)->test('system-settings')
+        ->assertSet('dispatchCertificateTimeoutSeconds', 0)
+        ->assertSee('Tiempo máximo para generar el reporte de certificados')
+        ->set('dispatchCertificateTimeoutSeconds', $seconds)
+        ->call('save')
+        ->assertHasNoErrors();
+
+    expect(SystemSetting::dispatchCertificateTimeoutSeconds())->toBe($seconds);
+
+    Livewire::test('system-settings')
+        ->assertSet('dispatchCertificateTimeoutSeconds', $seconds);
+})->with([0, 600]);
+
+test('certificate report timeout rejects negative values', function () {
+    $administrator = User::factory()->create(['role' => UserRole::Admin]);
+
+    Livewire::actingAs($administrator)->test('system-settings')
+        ->set('dispatchCertificateTimeoutSeconds', -1)
+        ->call('save')
+        ->assertHasErrors(['dispatchCertificateTimeoutSeconds' => 'min']);
+
+    expect(SystemSetting::query()->where('key', SystemSetting::DISPATCH_CERTIFICATE_TIMEOUT_SECONDS)->exists())->toBeFalse();
+});
+
 test('the original livewire payload limit defaults to one megabyte', function () {
     expect(SystemSetting::livewirePayloadMaxMb())->toBe(1)
         ->and(config('livewire.payload.max_size'))->toBe(1024 * 1024);

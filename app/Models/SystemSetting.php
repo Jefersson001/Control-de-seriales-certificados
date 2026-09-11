@@ -8,8 +8,17 @@ class SystemSetting extends Model
 {
     public const LIVEWIRE_PAYLOAD_MAX_MB = 'livewire_payload_max_mb';
 
+    public const DISPATCH_CERTIFICATE_TIMEOUT_SECONDS = 'dispatch_certificate_timeout_seconds';
+
     /** @var list<string> */
     protected $fillable = ['key', 'value'];
+
+    public static function dispatchCertificateTimeoutSeconds(): int
+    {
+        return max(0, (int) static::query()
+            ->where('key', self::DISPATCH_CERTIFICATE_TIMEOUT_SECONDS)
+            ->value('value'));
+    }
 
     public static function livewirePayloadMaxMb(): int
     {

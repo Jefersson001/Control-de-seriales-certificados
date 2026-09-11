@@ -8,6 +8,7 @@ use App\Models\Dispatch;
 use App\Models\MsCertificado;
 use App\Models\Product;
 use App\Models\ProductReturn;
+use App\Models\SystemSetting;
 use App\Models\User;
 use App\ReturnStatus;
 use App\UserPermission;
@@ -723,6 +724,50 @@ test('printing dispatch certificates throws when the certificate document is mis
         ->toThrow(RuntimeException::class, 'No se encontró el certificado DG-NIV-RG5-0175-PC');
 });
 
+test('certificate report timeout applies during generation and restores the original limit', function (?int $seconds, bool $fails) {
+    $administrator = User::factory()->create(['role' => UserRole::Admin]);
+    $dispatch = Dispatch::query()->create(['name' => 'WH/OUT/TIMEOUT']);
+
+    if ($seconds !== null) {
+        SystemSetting::query()->create([
+            'key' => SystemSetting::DISPATCH_CERTIFICATE_TIMEOUT_SECONDS,
+            'value' => (string) $seconds,
+        ]);
+    }
+
+    $originalTimeLimit = (int) ini_get('max_execution_time');
+
+    try {
+        set_time_limit(120);
+
+        $this->mock(PrintDispatchCertificates::class)
+            ->shouldReceive('handle')->once()
+            ->andReturnUsing(function (Dispatch $record) use ($dispatch, $seconds, $fails): string {
+                expect($record->id)->toBe($dispatch->id)
+                    ->and((int) ini_get('max_execution_time'))->toBe($seconds ?? 0);
+
+                if ($fails) {
+                    throw new RuntimeException('No se encontró el certificado.');
+                }
+
+                return '%PDF-1.4';
+            });
+
+        $response = $this->actingAs($administrator)
+            ->get(route('dispatches.certificates.print', $dispatch));
+
+        if ($fails) {
+            $response->assertUnprocessable();
+        } else {
+            $response->assertSuccessful()->assertDownload();
+        }
+
+        expect((int) ini_get('max_execution_time'))->toBe(120);
+    } finally {
+        set_time_limit($originalTimeLimit);
+    }
+})->with([null, 0, 600])->with([false, true]);
+
 test('the certificates print route requires permission and downloads the combined pdf', function () {
     Storage::fake('local');
     $administrator = User::factory()->create(['role' => UserRole::Admin]);
@@ -752,7 +797,7 @@ test('the certificates print route requires permission and downloads the combine
         ->assertDownload('certificados-whout00054.pdf');
 });
 
-test('the dispatch form shows the print certificates button for saved dispatches with serials', function () {
+test('the dispatch form shows the print certificates button only for done dispatches with serials', function () {
     $administrator = User::factory()->create(['role' => UserRole::Admin]);
     $serial = MsCertificado::factory()->create([
         'niv' => '8YZC7MCC0TD000601',
@@ -762,6 +807,11 @@ test('the dispatch form shows the print certificates button for saved dispatches
     $dispatch->lines()->create(['ms_certificado_id' => $serial->id]);
 
     $this->actingAs($administrator);
+
+    Livewire::test('dispatch-form', ['dispatchId' => $dispatch->id])
+        ->assertDontSee('Imprimir certificados');
+
+    $dispatch->update(['status' => DispatchStatus::Done]);
 
     Livewire::test('dispatch-form', ['dispatchId' => $dispatch->id])
         ->assertSee('Imprimir certificados');
