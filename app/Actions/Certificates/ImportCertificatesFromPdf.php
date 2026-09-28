@@ -179,6 +179,16 @@ class ImportCertificatesFromPdf
 
         $header = $this->findHeader($items->all());
 
+        if ($header !== null && $fallbackColumnPositions !== null) {
+            $rightmostBodyPosition = $items
+                ->filter(fn (array $item): bool => $item['y'] < $header['y'] - 3)
+                ->max('x');
+
+            if ($rightmostBodyPosition !== null && $header['columns'][0] > $rightmostBodyPosition) {
+                $header['columns'] = $fallbackColumnPositions;
+            }
+        }
+
         if ($header !== null) {
             $columnPositions = $header['columns'];
         } elseif ($fallbackColumnPositions !== null) {

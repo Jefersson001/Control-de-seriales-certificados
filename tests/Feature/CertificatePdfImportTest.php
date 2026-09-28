@@ -240,6 +240,70 @@ test('positioned pdf continuation pages reuse the previous column layout when th
         ->and($continuationResult['invalidRows'])->toBeEmpty();
 });
 
+test('continuation pages preserve table data when headers are displaced or the whole table moves', function (
+    bool $moveTable,
+    bool $invalidYear,
+) {
+    $extractor = app(ImportCertificatesFromPdf::class);
+    $previousColumns = [35.49, 88.16, 190.54, 300.67, 363.93, 418.73, 501.9];
+    $displacedColumns = [569.77, 589.61, 697.33, 799.37, 904.26, 958.11, 994.96];
+    $headers = ['#', 'Marca', 'Modelo', 'Tipo', 'Fabricación', 'Modelo', 'NIV'];
+    $valuePositions = $moveTable ? $displacedColumns : [33.82, 90.72, 182.93, 290.62, 380.87, 426.23, 466.67];
+    $page = [];
+
+    foreach ($headers as $index => $header) {
+        $page[] = [[1, 0, 0, 1, $displacedColumns[$index], 673.38], $header];
+    }
+
+    foreach ([52, 53] as $rowIndex => $number) {
+        $values = [(string) $number, 'BERA', 'BR 180 BWS', 'SCOOTER', '2026', $invalidYear ? '27' : '2027', '8YZBWSDB7VD010832'];
+
+        foreach ($values as $index => $value) {
+            $page[] = [[1, 0, 0, 1, $valuePositions[$index], 659.21 - $rowIndex * 11.34], $value];
+        }
+    }
+
+    $page[] = [[1, 0, 0, 1, 164.58, 56.01], 'La validez de la Constancia de Registro debe verificarse a través de la dirección'];
+    $page[] = [[1, 0, 0, 1, 168.58, 47.51], "https://sis.sencamer.gob.ve en el menú 'Consulta de Constancia de Registro'."];
+
+    $result = $extractor->extractPositionedRecords($page, 'DNRT-015-0926-R1-12032', 3, $previousColumns);
+
+    expect($result['columnPositions'])->toBe($moveTable ? $displacedColumns : $previousColumns);
+
+    if ($invalidYear) {
+        expect($result['records'])->toBeEmpty()
+            ->and($result['invalidCount'])->toBe(2)
+            ->and(array_column($result['invalidRows'], 'no'))->toBe(['52', '53'])
+            ->and($result['invalidRows'][0]['page'])->toBe(3)
+            ->and($result['invalidRows'][0]['reason'])->toContain('Año debe tener cuatro dígitos.');
+    } else {
+        expect($result['invalidRows'])->toBeEmpty()
+            ->and($result['invalidCount'])->toBe(0)
+            ->and(array_column($result['records'], 'no'))->toBe(['52', '53'])
+            ->and($result['records'][0])->toBe([
+                'no' => '52',
+                'marca' => 'BERA',
+                'modelo' => 'BR 180 BWS',
+                'tipo' => 'SCOOTER',
+                'fabricacion' => '2026',
+                'anio' => 2027,
+                'niv' => '8YZBWSDB7VD010832',
+                'codigo' => 'DNRT-015-0926-R1-12032',
+            ]);
+    }
+
+    $nextPage = array_slice($page, 7);
+    $nextResult = $extractor->extractPositionedRecords($nextPage, 'DNRT-015-0926-R1-12032', 4, $result['columnPositions']);
+
+    expect($nextResult['records'])->toBe($result['records'])
+        ->and($nextResult['invalidCount'])->toBe($result['invalidCount']);
+})->with([
+    'displaced headers' => [false, false],
+    'displaced headers with invalid rows' => [false, true],
+    'legitimate new layout' => [true, false],
+    'legitimate new layout with invalid rows' => [true, true],
+]);
+
 test('validated continuous values split into pdf fragments are joined without spaces', function () {
     $positionedText = [];
     $headers = ['#', 'Marca', 'Modelo', 'Tipo', 'Fabricación', 'Modelo', 'NIV'];
