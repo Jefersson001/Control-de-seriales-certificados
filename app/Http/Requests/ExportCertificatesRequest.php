@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Actions\Certificates\ApplyCertificateDateFilter;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 
@@ -24,6 +25,7 @@ class ExportCertificatesRequest extends FormRequest
     {
         return [
             'search' => ['nullable', 'string', 'max:255'],
+            ...ApplyCertificateDateFilter::rules((string) $this->input('dateFrom', '')),
         ];
     }
 }

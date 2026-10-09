@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Actions\Certificates\ApplyCertificateDateFilter;
 use App\Http\Requests\ExportCertificatesRequest;
 use App\Models\MsCertificado;
 use OpenSpout\Common\Entity\Row;
@@ -36,6 +37,7 @@ class CertificateExportController extends Controller
         foreach (
             MsCertificado::query()
                 ->search($search)
+                ->tap(fn ($query) => app(ApplyCertificateDateFilter::class)->handle($query, (string) $request->validated('dateField', ''), (string) $request->validated('dateFrom', ''), (string) $request->validated('dateTo', '')))
                 ->oldest('id')
                 ->cursor() as $certificate
         ) {

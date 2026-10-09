@@ -10,6 +10,7 @@ use App\UserPermission;
 use App\VehicleIdentificationRecordManagementStatus;
 use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Locked;
 use Livewire\Component;
@@ -120,6 +121,12 @@ new class extends Component
     {
         return ! $this->persistedDone
             && auth()->user()?->hasPermission(UserPermission::EditVehicleIdentificationRecordManagement) === true;
+    }
+
+    public function canEditRequestDate(): bool
+    {
+        return auth()->user()?->hasPermission(UserPermission::EditVehicleIdentificationRecordManagement) === true
+            && (! $this->persistedDone || $this->management->request_date === null);
     }
 
     public function analyzePdf(ProcessManagementCertificates $processor): void
@@ -336,22 +343,40 @@ new class extends Component
 
     public function save(): mixed
     {
-        abort_unless($this->canEdit(), 403);
-        $validated = $this->validate([
-            'status' => ['required', Rule::enum(VehicleIdentificationRecordManagementStatus::class)],
-            'requestDate' => ['nullable', 'date_format:Y-m-d'],
-        ], [
-            'requestDate.date_format' => 'Ingresa una fecha de la solicitud de certificación válida.',
-        ]);
-        abort_if($validated['status'] === VehicleIdentificationRecordManagementStatus::Done->value, 422);
+        abort_unless(auth()->user()?->hasPermission(UserPermission::EditVehicleIdentificationRecordManagement), 403);
 
-        VehicleIdentificationRecordManagement::query()->findOrFail($this->managementId)->update([
-            'status' => $validated['status'],
-            'request_date' => $validated['requestDate'] ?: null,
-        ]);
+        DB::transaction(function (): void {
+            $management = VehicleIdentificationRecordManagement::query()->lockForUpdate()->findOrFail($this->managementId);
 
-        return redirect()
-            ->route('vehicle_identification_record_management.edit', $this->managementId)
+            if ($management->status === VehicleIdentificationRecordManagementStatus::Done) {
+                abort_if($management->request_date !== null, 403);
+                $validated = $this->validate([
+                    'requestDate' => ['required', 'date_format:Y-m-d'],
+                ], [
+                    'requestDate.required' => 'Ingresa la fecha de la solicitud de certificación.',
+                    'requestDate.date_format' => 'Ingresa una fecha válida.',
+                ]);
+                $management->update(['request_date' => $validated['requestDate']]);
+
+                return;
+            }
+
+            $validated = $this->validate([
+                'status' => ['required', Rule::enum(VehicleIdentificationRecordManagementStatus::class)],
+                'requestDate' => ['nullable', 'date_format:Y-m-d'],
+            ], [
+                'requestDate.date_format' => 'Ingresa una fecha de la solicitud de certificación válida.',
+            ]);
+            abort_if($validated['status'] === VehicleIdentificationRecordManagementStatus::Done->value, 422);
+            $management->update([
+                'status' => $validated['status'],
+                'request_date' => $validated['requestDate'] ?: null,
+            ]);
+        });
+
+        unset($this->management);
+
+        return redirect()->route('vehicle_identification_record_management.edit', $this->managementId)
             ->with('status', 'Gestión actualizada correctamente.');
     }
 
@@ -382,7 +407,7 @@ new class extends Component
         </div>
 
         <div class="flex items-center gap-3">
-            @if ($this->canEdit())
+            @if ($this->canEditRequestDate())
                 <button wire:click="save" wire:loading.attr="disabled" wire:target="save" type="button" class="rounded-xl bg-violet-600 px-6 py-3 font-semibold text-white shadow-lg shadow-violet-500/25 transition hover:bg-violet-500 disabled:opacity-60">
                     <span wire:loading.remove wire:target="save">Guardar</span>
                     <span wire:loading wire:target="save">Guardando...</span>
@@ -451,7 +476,7 @@ new class extends Component
 
             <div class="mt-6 w-full sm:w-1/2">
                 <label for="management-request-date" class="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-300">Fecha de la solicitud de certificación</label>
-                <input id="management-request-date" wire:model="requestDate" type="date" @disabled(! $this->canEdit()) class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-950 outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-500/10 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-slate-950/60 dark:text-white">
+                <input id="management-request-date" wire:model="requestDate" type="date" @disabled(! $this->canEditRequestDate()) class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-950 outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-500/10 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-slate-950/60 dark:text-white">
                 @error('requestDate') <p class="mt-2 text-sm text-red-600 dark:text-red-400">{{ $message }}</p> @enderror
             </div>
 
@@ -669,7 +694,7 @@ new class extends Component
             @endif
 
             @if ($persistedDone)
-                <p class="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-medium text-emerald-800 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200">Esta gestión está hecha y no admite modificaciones.</p>
+                <p class="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-medium text-emerald-800 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200">Esta gestión está hecha y no admite modificaciones. Si la fecha de solicitud está vacía, puedes completarla una sola vez con permiso de edición.</p>
             @endif
         </div>
     </div>

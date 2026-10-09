@@ -1,5 +1,7 @@
 <?php
 
+use App\Actions\Certificates\ApplyCertificateDateFilter;
+
 use App\Models\CertificateDocument;
 use App\UserPermission;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -10,6 +12,31 @@ use Livewire\WithPagination;
 new class extends Component
 {
     use WithPagination;
+
+    public string $dateField = '';
+
+    public string $dateFrom = '';
+
+    public string $dateTo = '';
+
+    public function updatedDateField(): void
+    {
+        $this->reset(['dateFrom', 'dateTo']);
+        $this->resetErrorBag();
+        $this->resetPage();
+        $this->validate(ApplyCertificateDateFilter::rules());
+    }
+
+    public function updatedDateFrom(): void
+    {
+        $this->resetPage();
+        $this->validate(ApplyCertificateDateFilter::rules($this->dateFrom));
+    }
+
+    public function updatedDateTo(): void
+    {
+        $this->updatedDateFrom();
+    }
 
     public string $search = '';
 
@@ -69,6 +96,7 @@ new class extends Component
                     ->where('control_number', 'like', "%{$search}%")
                     ->orWhere('file_name', 'like', "%{$search}%");
             }))
+            ->tap(fn ($query) => app(ApplyCertificateDateFilter::class)->handle($query, $this->dateField, $this->dateFrom, $this->dateTo))
             ->latest()
             ->paginate($this->perPage);
     }
@@ -111,6 +139,8 @@ new class extends Component
             </div>
             <x-per-page-selector id="certificate-documents-per-page" />
         </div>
+
+        <x-certificate-date-filter :field="$dateField" />
 
         <div class="overflow-x-auto">
             <table class="w-full min-w-3xl text-left">

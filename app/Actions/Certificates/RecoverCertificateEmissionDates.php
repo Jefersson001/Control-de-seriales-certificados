@@ -13,6 +13,25 @@ class RecoverCertificateEmissionDates
 {
     public function __construct(private ImportCertificatesFromPdf $extractor) {}
 
+    /** @return array{updated: int, skipped: int, sourceIndex: int, afterId: int, hasMore: bool} */
+    public function handleBatch(int $sourceIndex = 0, int $afterId = 0): array
+    {
+        $sources = [VehicleIdentificationRecordManagementCertificate::class, CertificateDocument::class];
+        $modelClass = $sources[$sourceIndex] ?? null;
+
+        if ($modelClass === null) {
+            return ['updated' => 0, 'skipped' => 0, 'sourceIndex' => $sourceIndex, 'afterId' => $afterId, 'hasMore' => false];
+        }
+
+        $certificate = $modelClass::query()->whereNull('issued_on')->where('id', '>', $afterId)->orderBy('id')->first();
+
+        if ($certificate === null) {
+            return ['updated' => 0, 'skipped' => 0, 'sourceIndex' => $sourceIndex + 1, 'afterId' => 0, 'hasMore' => $sourceIndex + 1 < count($sources)];
+        }
+
+        return [...$this->handle($certificate->control_number), 'sourceIndex' => $sourceIndex, 'afterId' => $certificate->id, 'hasMore' => true];
+    }
+
     /** @return array{updated: int, skipped: int} */
     public function handle(?string $controlNumber = null): array
     {

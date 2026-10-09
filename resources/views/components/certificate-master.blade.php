@@ -1,5 +1,7 @@
 <?php
 
+use App\Actions\Certificates\ApplyCertificateDateFilter;
+
 use App\Models\MsCertificado;
 use App\CertificateStatus;
 use App\UserPermission;
@@ -24,6 +26,31 @@ new class extends Component
     #[Locked]
     public int $importSkippedCount = 0;
 
+    public string $dateField = '';
+
+    public string $dateFrom = '';
+
+    public string $dateTo = '';
+
+    public function updatedDateField(): void
+    {
+        $this->reset(['dateFrom', 'dateTo']);
+        $this->resetErrorBag();
+        $this->resetPage();
+        $this->validate(ApplyCertificateDateFilter::rules());
+    }
+
+    public function updatedDateFrom(): void
+    {
+        $this->resetPage();
+        $this->validate(ApplyCertificateDateFilter::rules($this->dateFrom));
+    }
+
+    public function updatedDateTo(): void
+    {
+        $this->updatedDateFrom();
+    }
+
     public string $search = '';
 
     public $perPage = 10;
@@ -45,6 +72,10 @@ new class extends Component
 
     #[Locked]
     public int $deleteCount = 0;
+
+    /** @var array{0: string, 1: string, 2: string} */
+    #[Locked]
+    public array $deleteDateFilters = ['', '', ''];
 
     public function mount(): void
     {
@@ -117,6 +148,8 @@ new class extends Component
     {
         abort_unless(auth()->user()?->hasPermission(UserPermission::DeleteCertificates), 403);
 
+        $this->validate(ApplyCertificateDateFilter::rules($this->dateFrom));
+        $this->deleteDateFilters = [$this->dateField, $this->dateFrom, $this->dateTo];
         $this->deleteSearch = trim($this->search);
         $this->deleteRecordFilter = $this->recordFilter;
         $this->deleteStatusFilter = $this->statusFilter;
@@ -124,13 +157,14 @@ new class extends Component
             ->search($this->deleteSearch)
             ->filterByNivStatus($this->deleteRecordFilter)
             ->filterByCertificateStatus($this->deleteStatusFilter)
+            ->tap(fn ($query) => app(ApplyCertificateDateFilter::class)->handle($query, ...$this->deleteDateFilters))
             ->count();
         $this->showDeleteConfirmation = true;
     }
 
     public function closeDeleteConfirmation(): void
     {
-        $this->reset(['showDeleteConfirmation', 'deleteSearch', 'deleteRecordFilter', 'deleteStatusFilter', 'deleteCount']);
+        $this->reset(['showDeleteConfirmation', 'deleteSearch', 'deleteRecordFilter', 'deleteStatusFilter', 'deleteCount', 'deleteDateFilters']);
     }
 
     public function deleteRecords(): void
@@ -141,6 +175,7 @@ new class extends Component
             ->search($this->deleteSearch)
             ->filterByNivStatus($this->deleteRecordFilter)
             ->filterByCertificateStatus($this->deleteStatusFilter)
+            ->tap(fn ($query) => app(ApplyCertificateDateFilter::class)->handle($query, ...$this->deleteDateFilters))
             ->delete();
 
         $this->closeDeleteConfirmation();
@@ -171,7 +206,8 @@ new class extends Component
             ])
             ->search($this->search)
             ->filterByNivStatus($this->recordFilter)
-            ->filterByCertificateStatus($this->statusFilter);
+            ->filterByCertificateStatus($this->statusFilter)
+            ->tap(fn ($query) => app(ApplyCertificateDateFilter::class)->handle($query, $this->dateField, $this->dateFrom, $this->dateTo));
 
         if ($this->recordFilter === 'group_by_certificate') {
             return $query
@@ -196,6 +232,7 @@ new class extends Component
         return MsCertificado::query()
             ->search($this->search)
             ->filterByCertificateStatus($this->statusFilter)
+            ->tap(fn ($query) => app(ApplyCertificateDateFilter::class)->handle($query, $this->dateField, $this->dateFrom, $this->dateTo))
             ->selectRaw('codigo, COUNT(*) as aggregate')
             ->groupBy('codigo')
             ->orderBy('codigo')
@@ -222,7 +259,7 @@ new class extends Component
                 Importar Excel
             </label>
         @endif
-        <a href="{{ route('certificates.export', ['search' => trim($search)]) }}" class="inline-flex items-center justify-center gap-2 rounded-xl border-2 border-slate-950 bg-white px-4 py-3 text-sm font-bold text-slate-950 shadow-sm transition hover:bg-slate-950 hover:text-white dark:border-white dark:bg-slate-900 dark:text-white dark:hover:bg-white dark:hover:text-slate-950">
+        <a href="{{ route('certificates.export', ['search' => trim($search), 'dateField' => $dateField, 'dateFrom' => $dateFrom, 'dateTo' => $dateTo]) }}" class="inline-flex items-center justify-center gap-2 rounded-xl border-2 border-slate-950 bg-white px-4 py-3 text-sm font-bold text-slate-950 shadow-sm transition hover:bg-slate-950 hover:text-white dark:border-white dark:bg-slate-900 dark:text-white dark:hover:bg-white dark:hover:text-slate-950">
             <svg class="size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v12m0 0 4-4m-4 4-4-4M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3"/>
             </svg>
@@ -358,6 +395,8 @@ new class extends Component
             </div>
             <x-per-page-selector id="certificates-per-page" />
         </div>
+
+        <x-certificate-date-filter :field="$dateField" />
 
         @if ($recordFilter === 'group_by_certificate')
             <div class="flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-indigo-200 bg-indigo-50 px-5 py-4 text-sm text-indigo-900 dark:border-indigo-500/20 dark:bg-indigo-500/10 dark:text-indigo-200">
