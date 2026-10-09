@@ -577,23 +577,30 @@ class ImportCertificatesFromPdf
 
     public function extractIssuedOn(string $filePath): ?string
     {
-        $pdf = (new Parser)->parseFile($filePath);
-        $this->normalizeDocumentDetails($pdf);
+        gc_collect_cycles();
 
-        foreach ($pdf->getPages() as $page) {
-            $issuedOn = $this->findIssuedOn($page->getText());
+        try {
+            $pdf = (new Parser)->parseFile($filePath);
+            $this->normalizeDocumentDetails($pdf);
 
-            if ($issuedOn !== null) {
-                return $issuedOn;
+            foreach ($pdf->getPages() as $page) {
+                $issuedOn = $this->findIssuedOn($page->getText());
+
+                if ($issuedOn !== null) {
+                    return $issuedOn;
+                }
             }
-        }
 
-        return null;
+            return null;
+        } finally {
+            unset($page, $pdf);
+            gc_collect_cycles();
+        }
     }
 
     private function findIssuedOn(string $text): ?string
     {
-        if (preg_match('/Fecha\s+de\s+Emisi[oó]n\s*:\s*(\d{1,2})\s*[-\/.]\s*(\d{1,2})\s*[-\/.]\s*(\d{4})(?!\d)/iu', $text, $matches) !== 1) {
+        if (preg_match('/Fecha\s*de\s*Emisi[oó]n\s*:\s*(\d{1,2})\s*[-\/.]\s*(\d{1,2})\s*[-\/.]\s*(\d{4})(?!\d)/iu', $text, $matches) !== 1) {
             return null;
         }
 

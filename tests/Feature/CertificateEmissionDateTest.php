@@ -20,6 +20,8 @@ test('emission dates are extracted after the label regardless of whitespace', fu
         ->and($analysis['controlNumber'])->toBe('DG-NIV-RG1-0362-PC');
 })->with([
     ['Fecha de Emisión:28-08-2026', '2026-08-28'],
+    ['FechadeEmisión: 02-09-2026', '2026-09-02'],
+    ['Fecha deEmisión:17-08-2026', '2026-08-17'],
     ['Fecha de Emisión:           28-08-2026', '2026-08-28'],
     ["Fecha de Emisión:\n\t28/08/2026", '2026-08-28'],
     ['FECHA DE EMISION: 1 - 2 - 2026', '2026-02-01'],
