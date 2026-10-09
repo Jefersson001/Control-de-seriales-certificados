@@ -25,6 +25,8 @@ new class extends Component
 
     public string $status = VehicleIdentificationRecordManagementStatus::Draft->value;
 
+    public ?string $requestDate = null;
+
     #[Locked]
     public bool $persistedDone = false;
 
@@ -88,6 +90,7 @@ new class extends Component
         $this->managementId = $managementId;
         $management = VehicleIdentificationRecordManagement::query()->findOrFail($managementId);
         $this->status = $management->status->value;
+        $this->requestDate = $management->request_date?->format('Y-m-d');
         $this->persistedDone = $management->status === VehicleIdentificationRecordManagementStatus::Done;
 
         if ($management->certificates()->exists()) {
@@ -336,10 +339,16 @@ new class extends Component
         abort_unless($this->canEdit(), 403);
         $validated = $this->validate([
             'status' => ['required', Rule::enum(VehicleIdentificationRecordManagementStatus::class)],
+            'requestDate' => ['nullable', 'date_format:Y-m-d'],
+        ], [
+            'requestDate.date_format' => 'Ingresa una fecha de la solicitud de certificación válida.',
         ]);
         abort_if($validated['status'] === VehicleIdentificationRecordManagementStatus::Done->value, 422);
 
-        VehicleIdentificationRecordManagement::query()->findOrFail($this->managementId)->update($validated);
+        VehicleIdentificationRecordManagement::query()->findOrFail($this->managementId)->update([
+            'status' => $validated['status'],
+            'request_date' => $validated['requestDate'] ?: null,
+        ]);
 
         return redirect()
             ->route('vehicle_identification_record_management.edit', $this->managementId)
@@ -438,6 +447,12 @@ new class extends Component
                     <p class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Total de seriales</p>
                     <p class="mt-2 text-2xl font-semibold">{{ $this->management->motorcycleSerialRequest->lines->sum(fn ($line) => $line->serialEntries->count()) }}</p>
                 </div>
+            </div>
+
+            <div class="mt-6 w-full sm:w-1/2">
+                <label for="management-request-date" class="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-300">Fecha de la solicitud de certificación</label>
+                <input id="management-request-date" wire:model="requestDate" type="date" @disabled(! $this->canEdit()) class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-950 outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-500/10 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-slate-950/60 dark:text-white">
+                @error('requestDate') <p class="mt-2 text-sm text-red-600 dark:text-red-400">{{ $message }}</p> @enderror
             </div>
 
             <section x-data="{ processing: false, total: 0, completed: 0, progress: 0, progressTimer: null, startProgress() { this.stopProgress(); this.progressTimer = setInterval(() => { const limit = ((this.completed + 0.99) / this.total) * 100; if (this.progress < limit) { this.progress = Math.min(limit, this.progress + Math.max(0.2, (limit - this.progress) * 0.025)); } }, 400); }, stopProgress() { if (this.progressTimer !== null) { clearInterval(this.progressTimer); this.progressTimer = null; } }, async processCertificates() { this.processing = true; this.total = $wire.pdfFiles.length; this.completed = 0; this.progress = 0; try { let hasMore = true; while (hasMore) { this.startProgress(); hasMore = await $wire.processNextPdf(); this.stopProgress(); this.completed++; this.progress = Math.round((this.completed / this.total) * 100); } await new Promise(resolve => setTimeout(resolve, 700)); } finally { this.stopProgress(); this.processing = false; } } }" class="mt-8 overflow-hidden rounded-3xl border border-sky-200 bg-sky-50/60 dark:border-sky-500/20 dark:bg-sky-500/5">

@@ -91,6 +91,8 @@ new class extends Component
                         <th class="px-6 py-4 font-semibold">Cantidad</th>
                         <th class="px-6 py-4 font-semibold">Creado por</th>
                         <th class="px-6 py-4 font-semibold">Fecha de creación</th>
+                        <th class="px-6 py-4 font-semibold">
+                             de certificación</th>
                         <th class="px-6 py-4 font-semibold">Estado</th>
                     </tr>
                 </thead>
@@ -102,6 +104,7 @@ new class extends Component
                             <td class="p-0"><a href="{{ route('vehicle_identification_record_management.edit', $record) }}" class="block px-6 py-4 font-semibold">{{ $record->motorcycleSerialRequest->lines->sum('quantity') }}</a></td>
                             <td class="p-0"><a href="{{ route('vehicle_identification_record_management.edit', $record) }}" class="block px-6 py-4 text-sm">{{ $record->motorcycleSerialRequest->user?->name ?? 'Usuario no disponible' }}</a></td>
                             <td class="p-0"><a href="{{ route('vehicle_identification_record_management.edit', $record) }}" class="block px-6 py-4 text-sm text-slate-500 dark:text-slate-400">{{ $record->created_at?->format('d/m/Y H:i') }}</a></td>
+                            <td class="p-0"><a href="{{ route('vehicle_identification_record_management.edit', $record) }}" class="block px-6 py-4 text-sm text-slate-500 dark:text-slate-400">{{ $record->request_date?->format('d/m/Y') ?? 'Sin registrar' }}</a></td>
                             <td class="p-0">
                                 <a href="{{ route('vehicle_identification_record_management.edit', $record) }}" class="block px-6 py-4">
                                     <span @class([
@@ -114,7 +117,7 @@ new class extends Component
                             </td>
                         </tr>
                     @empty
-                        <tr><td colspan="6" class="px-6 py-14 text-center"><p class="font-semibold">No se encontraron gestiones</p><p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Finaliza una solicitud de seriales para generar el primer registro.</p></td></tr>
+                        <tr><td colspan="7" class="px-6 py-14 text-center"><p class="font-semibold">No se encontraron gestiones</p><p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Finaliza una solicitud de seriales para generar el primer registro.</p></td></tr>
                     @endforelse
                 </tbody>
             </table>

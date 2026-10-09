@@ -43,6 +43,7 @@ test('finalizing a motorcycle serial request automatically creates one related m
         ->and($management->motorcycleSerialRequest->is($serialRequest))->toBeTrue()
         ->and($serialRequest->vehicleIdentificationRecordManagement->is($management))->toBeTrue()
         ->and($management->status)->toBe(VehicleIdentificationRecordManagementStatus::Draft)
+        ->and($management->request_date)->toBeNull()
         ->and(VehicleIdentificationRecordManagement::query()
             ->where('motorcycle_serial_request_id', $serialRequest->id)
             ->count())->toBe(1);
@@ -63,6 +64,7 @@ test('the management list shows generated records and has no manual creation act
         ->create([
             'status' => VehicleIdentificationRecordManagementStatus::Draft,
             'created_at' => '2026-08-04 10:30:00',
+            'request_date' => '2026-08-01',
         ]);
 
     $this->actingAs($administrator)
@@ -71,6 +73,8 @@ test('the management list shows generated records and has no manual creation act
         ->assertSee("#{$management->id}")
         ->assertSee("#{$serialRequest->id}")
         ->assertSee('04/08/2026 10:30')
+        ->assertSee('Fecha de la solicitud de certificación')
+        ->assertSee('01/08/2026')
         ->assertSee('Borrador')
         ->assertDontSee('Nuevo');
 
@@ -121,6 +125,88 @@ test('users with edit permission can update management status before importing',
 
     expect($management->refresh()->status)->toBe(VehicleIdentificationRecordManagementStatus::InProgress);
 });
+
+test('the request date is entered manually and persists independently of the creation date', function () {
+    $administrator = User::factory()->create(['role' => UserRole::Admin]);
+    $management = VehicleIdentificationRecordManagement::factory()->create([
+        'created_at' => '2026-08-04 10:30:00',
+    ]);
+
+    $this->actingAs($administrator);
+
+    Livewire::test('vehicle-identification-record-management-form', ['managementId' => $management->id])
+        ->assertSee('Fecha de la solicitud de certificación')
+        ->assertSeeHtml('class="mt-6 w-full sm:w-1/2"')
+        ->assertSeeHtml('type="date"')
+        ->assertSet('requestDate', null)
+        ->set('requestDate', '2026-08-01')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    expect($management->refresh()->request_date->format('Y-m-d'))->toBe('2026-08-01')
+        ->and($management->created_at->format('Y-m-d H:i:s'))->toBe('2026-08-04 10:30:00');
+
+    Livewire::test('vehicle-identification-record-management-form', ['managementId' => $management->id])
+        ->assertSet('requestDate', '2026-08-01')
+        ->set('requestDate', '2026-08-02')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    expect($management->refresh()->request_date->format('Y-m-d'))->toBe('2026-08-02');
+});
+
+test('the manual request date can be cleared', function () {
+    $administrator = User::factory()->create(['role' => UserRole::Admin]);
+    $management = VehicleIdentificationRecordManagement::factory()->create([
+        'request_date' => '2026-08-01',
+    ]);
+
+    $this->actingAs($administrator);
+
+    Livewire::test('vehicle-identification-record-management-form', ['managementId' => $management->id])
+        ->set('requestDate', '')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    expect($management->refresh()->request_date)->toBeNull();
+});
+
+test('invalid manual request dates are rejected', function (string $requestDate) {
+    $administrator = User::factory()->create(['role' => UserRole::Admin]);
+    $management = VehicleIdentificationRecordManagement::factory()->create();
+
+    $this->actingAs($administrator);
+
+    Livewire::test('vehicle-identification-record-management-form', ['managementId' => $management->id])
+        ->set('requestDate', $requestDate)
+        ->call('save')
+        ->assertHasErrors(['requestDate' => 'date_format']);
+
+    expect($management->refresh()->request_date)->toBeNull();
+})->with(['not-a-date', '2026-02-30', '01/08/2026']);
+
+test('read only or completed management records cannot change the manual request date', function (bool $completed) {
+    $user = User::factory()->create([
+        'permissions' => $completed
+            ? [UserPermission::ViewVehicleIdentificationRecordManagement->value, UserPermission::EditVehicleIdentificationRecordManagement->value]
+            : [UserPermission::ViewVehicleIdentificationRecordManagement->value],
+    ]);
+    $management = VehicleIdentificationRecordManagement::factory()->create([
+        'status' => $completed ? VehicleIdentificationRecordManagementStatus::Done : VehicleIdentificationRecordManagementStatus::Draft,
+        'request_date' => '2026-08-01',
+    ]);
+
+    $this->actingAs($user);
+
+    Livewire::test('vehicle-identification-record-management-form', ['managementId' => $management->id])
+        ->assertSee('Solo lectura')
+        ->assertSeeHtml('type="date" disabled')
+        ->set('requestDate', '2026-08-02')
+        ->call('save')
+        ->assertForbidden();
+
+    expect($management->refresh()->request_date->format('Y-m-d'))->toBe('2026-08-01');
+})->with([false, true]);
 
 test('view only users cannot change management status', function () {
     $user = User::factory()->create([
