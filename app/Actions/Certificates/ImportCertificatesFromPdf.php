@@ -16,6 +16,7 @@ class ImportCertificatesFromPdf
     /**
      * @return array{
      *     controlNumber: string,
+     *     issuedOn: string|null,
      *     records: list<array{no: string, marca: string, modelo: string, tipo: string, fabricacion: string, anio: int, niv: string, codigo: string}>,
      *     duplicateCount: int,
      *     duplicateRows: list<array{no: string, niv: string, values: list<string>, reason: string}>,
@@ -32,6 +33,7 @@ class ImportCertificatesFromPdf
             $result['records'],
             $result['invalidCount'],
             $result['invalidRows'],
+            $result['issuedOn'] ?? null,
         );
     }
 
@@ -40,6 +42,7 @@ class ImportCertificatesFromPdf
      *
      * @return array{
      *     controlNumber: string,
+     *     issuedOn: string|null,
      *     records: list<array{no: string, marca: string, modelo: string, tipo: string, fabricacion: string, anio: int, niv: string, codigo: string}>,
      *     invalidCount: int,
      *     invalidRows: list<array{page: int|null, no: string, niv: string, values: list<string>, reason: string}>
@@ -54,6 +57,7 @@ class ImportCertificatesFromPdf
         $pdf = (new Parser([], $config))->parseFile($filePath);
         $this->normalizeDocumentDetails($pdf);
         $controlNumber = null;
+        $issuedOn = null;
         $records = [];
         $invalidCount = 0;
         $invalidRows = [];
@@ -63,6 +67,7 @@ class ImportCertificatesFromPdf
             $positionedText = $page->getDataTm();
             $pageText = implode(' ', array_column($positionedText, 1));
             $controlNumber ??= $this->findControlNumber($pageText);
+            $issuedOn ??= $this->findIssuedOn($pageText) ?? $this->findIssuedOn($page->getText());
 
             if ($controlNumber === null) {
                 continue;
@@ -90,6 +95,7 @@ class ImportCertificatesFromPdf
 
         return [
             'controlNumber' => $controlNumber,
+            'issuedOn' => $issuedOn,
             'records' => $records,
             'invalidCount' => $invalidCount,
             'invalidRows' => $invalidRows,
@@ -101,6 +107,7 @@ class ImportCertificatesFromPdf
      *
      * @return array{
      *     controlNumber: string,
+     *     issuedOn: string|null,
      *     records: list<array{no: string, marca: string, modelo: string, tipo: string, fabricacion: string, anio: int, niv: string, codigo: string}>,
      *     duplicateCount: int,
      *     duplicateRows: list<array{no: string, niv: string, values: list<string>, reason: string}>,
@@ -138,7 +145,7 @@ class ImportCertificatesFromPdf
             $records[] = $record;
         }
 
-        return $this->prepareResult($controlNumber, $records, $invalidCount, $invalidRows);
+        return $this->prepareResult($controlNumber, $records, $invalidCount, $invalidRows, $this->findIssuedOn($text));
     }
 
     /**
@@ -424,6 +431,7 @@ class ImportCertificatesFromPdf
     /**
      * @param  array{
      *     controlNumber: string,
+     *     issuedOn: string|null,
      *     records: list<array{no: string, marca: string, modelo: string, tipo: string, fabricacion: string, anio: int, niv: string, codigo: string}>,
      *     duplicateRows: list<array{no: string, niv: string, values: list<string>, reason: string}>,
      *     invalidRows: list<array{page: int|null, no: string, niv: string, values: list<string>, reason: string}>
@@ -446,7 +454,7 @@ class ImportCertificatesFromPdf
                     $includeInvalid,
                 ): array {
                     $readyResult = $includeReady
-                        ? $this->storeReadyRecords($analysis['records'])
+                        ? $this->storeReadyRecords($analysis['records'], $analysis['issuedOn'] ?? null)
                         : ['imported' => 0, 'skipped' => 0];
                     $duplicateRecords = $includeDuplicates
                         ? $this->recordsFromAnalysisRows(
@@ -460,8 +468,8 @@ class ImportCertificatesFromPdf
                             $analysis['controlNumber'],
                         )
                         : [];
-                    $duplicates = $this->insertRecords($duplicateRecords);
-                    $invalid = $this->insertRecords($invalidRecords);
+                    $duplicates = $this->insertRecords($duplicateRecords, $analysis['issuedOn'] ?? null);
+                    $invalid = $this->insertRecords($invalidRecords, $analysis['issuedOn'] ?? null);
 
                     return [
                         'imported' => $readyResult['imported'] + $duplicates + $invalid,
@@ -479,7 +487,7 @@ class ImportCertificatesFromPdf
      * @param  list<array{no: string, marca: string, modelo: string, tipo: string, fabricacion: string, anio: int, niv: string, codigo: string}>  $records
      * @return array{imported: int, skipped: int}
      */
-    private function storeReadyRecords(array $records): array
+    private function storeReadyRecords(array $records, ?string $issuedOn = null): array
     {
         $imported = 0;
         $skipped = 0;
@@ -495,7 +503,7 @@ class ImportCertificatesFromPdf
             ));
 
             $skipped += count($recordChunk) - count($newRecords);
-            $imported += $this->insertRecords($newRecords);
+            $imported += $this->insertRecords($newRecords, $issuedOn);
         }
 
         return compact('imported', 'skipped');
@@ -504,7 +512,7 @@ class ImportCertificatesFromPdf
     /**
      * @param  list<array{no: string, marca: string, modelo: string, tipo: string, fabricacion: string, anio: int, niv: string, codigo: string}>  $records
      */
-    private function insertRecords(array $records): int
+    private function insertRecords(array $records, ?string $issuedOn = null): int
     {
         $imported = 0;
 
@@ -517,6 +525,7 @@ class ImportCertificatesFromPdf
             $recordsWithTimestamps = array_map(
                 fn (array $record): array => [
                     ...$record,
+                    'issued_on' => $issuedOn,
                     'created_at' => $timestamp,
                     'updated_at' => $timestamp,
                 ],
@@ -564,6 +573,37 @@ class ImportCertificatesFromPdf
         }
 
         return $controlNumber;
+    }
+
+    public function extractIssuedOn(string $filePath): ?string
+    {
+        $pdf = (new Parser)->parseFile($filePath);
+        $this->normalizeDocumentDetails($pdf);
+
+        foreach ($pdf->getPages() as $page) {
+            $issuedOn = $this->findIssuedOn($page->getText());
+
+            if ($issuedOn !== null) {
+                return $issuedOn;
+            }
+        }
+
+        return null;
+    }
+
+    private function findIssuedOn(string $text): ?string
+    {
+        if (preg_match('/Fecha\s+de\s+Emisi[oó]n\s*:\s*(\d{1,2})\s*[-\/.]\s*(\d{1,2})\s*[-\/.]\s*(\d{4})(?!\d)/iu', $text, $matches) !== 1) {
+            return null;
+        }
+
+        $day = (int) $matches[1];
+        $month = (int) $matches[2];
+        $year = (int) $matches[3];
+
+        return checkdate($month, $day, $year)
+            ? sprintf('%04d-%02d-%02d', $year, $month, $day)
+            : null;
     }
 
     private function findControlNumber(string $text): ?string
@@ -631,6 +671,7 @@ class ImportCertificatesFromPdf
      * @param  list<array{no: string, marca: string, modelo: string, tipo: string, fabricacion: string, anio: int, niv: string, codigo: string}>  $records
      * @return array{
      *     controlNumber: string,
+     *     issuedOn: string|null,
      *     records: list<array{no: string, marca: string, modelo: string, tipo: string, fabricacion: string, anio: int, niv: string, codigo: string}>,
      *     duplicateCount: int,
      *     duplicateRows: list<array{no: string, niv: string, values: list<string>, reason: string}>,
@@ -642,6 +683,7 @@ class ImportCertificatesFromPdf
         array $records,
         int $invalidCount,
         array $invalidRows = [],
+        ?string $issuedOn = null,
     ): array {
         $recordsByNiv = [];
         $duplicateCount = 0;
@@ -686,6 +728,7 @@ class ImportCertificatesFromPdf
 
         return [
             'controlNumber' => $controlNumber,
+            'issuedOn' => $issuedOn,
             'records' => array_values($recordsByNiv),
             'duplicateCount' => $duplicateCount,
             'duplicateRows' => $duplicateRows,

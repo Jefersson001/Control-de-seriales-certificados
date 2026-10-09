@@ -49,7 +49,7 @@ class ImportManagementCertificateAnalysis
                     VehicleIdentificationRecordCertificateSerialClassification::Invalid->value => $includeInvalid,
                 ])->filter()->keys()->all();
                 $results = VehicleIdentificationRecordCertificateSerial::query()
-                    ->with('certificate:id,management_id,control_number')
+                    ->with('certificate:id,management_id,control_number,issued_on')
                     ->whereHas('certificate', fn ($query) => $query->where('management_id', $management->id))
                     ->whereIn('classification', $selected)
                     ->whereNull('imported_at')
@@ -96,6 +96,7 @@ class ImportManagementCertificateAnalysis
                         continue;
                     }
 
+                    $record['issued_on'] = $result->certificate->issued_on?->format('Y-m-d');
                     $processedResultIds[] = $result->id;
 
                     if (
@@ -189,6 +190,7 @@ class ImportManagementCertificateAnalysis
                         $certificate->original_file_name,
                         $certificate->control_number,
                         $management->id,
+                        $certificate->issued_on?->format('Y-m-d'),
                     );
 
                     if ($document->wasRecentlyCreated) {
@@ -208,7 +210,7 @@ class ImportManagementCertificateAnalysis
         );
     }
 
-    /** @return array{no: string, marca: string, modelo: string, tipo: string, fabricacion: string, anio: int, niv: string, codigo: string}|null */
+    /** @return array{no: string, marca: string, modelo: string, tipo: string, fabricacion: string, anio: int, niv: string, codigo: string, issued_on: string|null}|null */
     private function recordFrom(VehicleIdentificationRecordCertificateSerial $result): ?array
     {
         $source = $result->source_data;
@@ -241,7 +243,7 @@ class ImportManagementCertificateAnalysis
 
     /**
      * @param  array<string, mixed>  $record
-     * @return array{no: string, marca: string, modelo: string, tipo: string, fabricacion: string, anio: int, niv: string, codigo: string}
+     * @return array{no: string, marca: string, modelo: string, tipo: string, fabricacion: string, anio: int, niv: string, codigo: string, issued_on: string|null}
      */
     private function normalizeRecord(array $record): array
     {
@@ -254,6 +256,7 @@ class ImportManagementCertificateAnalysis
             'anio' => ctype_digit((string) ($record['anio'] ?? '')) ? (int) $record['anio'] : 0,
             'niv' => Str::substr(Str::upper((string) ($record['niv'] ?? '')), 0, 50),
             'codigo' => Str::substr((string) ($record['codigo'] ?? ''), 0, 100),
+            'issued_on' => null,
         ];
     }
 }

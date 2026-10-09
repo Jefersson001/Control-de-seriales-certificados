@@ -64,6 +64,7 @@ class ProcessManagementCertificates
                     $storedPaths[] = $path;
                     $certificate = $management->certificates()->create([
                         'control_number' => $analysis['controlNumber'],
+                        'issued_on' => $analysis['issuedOn'] ?? null,
                         'original_file_name' => $file->getClientOriginalName(),
                         'file_path' => $path,
                         'file_hash' => $prepared['hash'],
@@ -182,6 +183,7 @@ class ProcessManagementCertificates
                 'classification' => $result->classification->value,
                 'certificate_id' => $certificate->id,
                 'certificate' => $certificate->control_number,
+                'issued_on' => $certificate->issued_on?->format('d/m/Y'),
                 'imported' => $result->imported_at !== null,
                 'requested' => (bool) ($result->source_data['_requested']
                     ?? ! str_contains($result->reason ?? '', 'no solicitado')),

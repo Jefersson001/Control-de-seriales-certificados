@@ -118,7 +118,7 @@ new class extends Component
             $this->includeDuplicates,
             $this->includeInvalid,
         );
-        $storeCertificateDocument->handle($this->pdfFile, $analysis['controlNumber']);
+        $storeCertificateDocument->handle($this->pdfFile, $analysis['controlNumber'], issuedOn: $analysis['issuedOn'] ?? null);
 
         $this->reset(['pdfFile']);
         $this->resetPreview();

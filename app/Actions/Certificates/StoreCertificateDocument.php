@@ -11,13 +11,14 @@ use Throwable;
 
 class StoreCertificateDocument
 {
-    public function handle(UploadedFile $pdf, string $controlNumber, ?int $managementId = null): CertificateDocument
+    public function handle(UploadedFile $pdf, string $controlNumber, ?int $managementId = null, ?string $issuedOn = null): CertificateDocument
     {
         return $this->storeOnce(
             $controlNumber, $pdf->getClientOriginalName(), $managementId,
             fn (string $path): bool => (bool) Storage::disk('local')->putFileAs(
                 dirname($path), $pdf, basename($path),
             ),
+            $issuedOn,
         );
     }
 
@@ -26,6 +27,7 @@ class StoreCertificateDocument
         string $originalFileName,
         string $controlNumber,
         int $managementId,
+        ?string $issuedOn = null,
     ): CertificateDocument {
         return $this->storeOnce(
             $controlNumber, $originalFileName, $managementId,
@@ -44,6 +46,7 @@ class StoreCertificateDocument
                     }
                 }
             },
+            $issuedOn,
         );
     }
 
@@ -53,18 +56,23 @@ class StoreCertificateDocument
         string $originalFileName,
         ?int $managementId,
         callable $writeFile,
+        ?string $issuedOn = null,
     ): CertificateDocument {
         $normalizedControlNumber = Str::upper(trim($controlNumber));
 
         return Cache::lock('certificate-document:'.hash('sha256', $normalizedControlNumber), 15)->block(
             5,
-            function () use ($normalizedControlNumber, $originalFileName, $managementId, $writeFile): CertificateDocument {
+            function () use ($normalizedControlNumber, $originalFileName, $managementId, $writeFile, $issuedOn): CertificateDocument {
                 $existing = CertificateDocument::query()
                     ->whereRaw('UPPER(TRIM(control_number)) = ?', [$normalizedControlNumber])
                     ->oldest('id')
                     ->first();
 
                 if ($existing !== null) {
+                    if ($issuedOn !== null && $existing->issued_on === null) {
+                        $existing->update(['issued_on' => $issuedOn]);
+                    }
+
                     if ($managementId === null && ! $existing->imported_without_management) {
                         $existing->update(['imported_without_management' => true]);
                     }
@@ -88,6 +96,7 @@ class StoreCertificateDocument
                         'uploaded_by' => auth()->id(),
                         'imported_without_management' => $managementId === null,
                         'control_number' => $normalizedControlNumber,
+                        'issued_on' => $issuedOn,
                         'file_name' => $downloadName,
                         'original_file_name' => $originalFileName,
                         'file_path' => $path,

@@ -25,7 +25,7 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
-#[Fillable(['no', 'marca', 'modelo', 'tipo', 'fabricacion', 'anio', 'niv', 'status', 'codigo'])]
+#[Fillable(['no', 'marca', 'modelo', 'tipo', 'fabricacion', 'anio', 'niv', 'status', 'codigo', 'issued_on'])]
 class MsCertificado extends Model
 {
     /** @use HasFactory<MsCertificadoFactory> */
@@ -135,6 +135,7 @@ class MsCertificado extends Model
     {
         return [
             'anio' => 'integer',
+            'issued_on' => 'date',
             'status' => CertificateStatus::class,
         ];
     }

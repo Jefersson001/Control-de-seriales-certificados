@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Storage;
     'uploaded_by',
     'imported_without_management',
     'control_number',
+    'issued_on',
     'file_name',
     'original_file_name',
     'file_path',
@@ -46,6 +47,7 @@ class CertificateDocument extends Model
     protected function casts(): array
     {
         return [
+            'issued_on' => 'date',
             'imported_without_management' => 'boolean',
         ];
     }

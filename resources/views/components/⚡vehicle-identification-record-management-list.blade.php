@@ -91,8 +91,7 @@ new class extends Component
                         <th class="px-6 py-4 font-semibold">Cantidad</th>
                         <th class="px-6 py-4 font-semibold">Creado por</th>
                         <th class="px-6 py-4 font-semibold">Fecha de creación</th>
-                        <th class="px-6 py-4 font-semibold">
-                             de certificación</th>
+                        <th class="px-6 py-4 font-semibold">Fecha de la solicitud de certificación</th>
                         <th class="px-6 py-4 font-semibold">Estado</th>
                     </tr>
                 </thead>

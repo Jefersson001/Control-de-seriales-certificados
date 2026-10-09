@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 #[Fillable([
     'management_id',
     'control_number',
+    'issued_on',
     'original_file_name',
     'file_path',
     'file_hash',
@@ -40,6 +41,7 @@ class VehicleIdentificationRecordManagementCertificate extends Model
     protected function casts(): array
     {
         return [
+            'issued_on' => 'date',
             'valid_occurrence_count' => 'integer',
             'invalid_count' => 'integer',
             'analyzed_at' => 'datetime',
