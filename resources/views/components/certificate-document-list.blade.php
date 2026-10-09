@@ -63,7 +63,7 @@ new class extends Component
         $search = trim($this->search);
 
         return CertificateDocument::query()
-            ->with('managements:id')
+            ->with('managements:id,request_date')
             ->when($search !== '', fn ($query) => $query->where(function ($query) use ($search): void {
                 $query
                     ->where('control_number', 'like', "%{$search}%")
@@ -119,6 +119,7 @@ new class extends Component
                         <th class="px-5 py-4 font-semibold">Certificado</th>
                         <th class="px-5 py-4 font-semibold">Gestión</th>
                         <th class="px-5 py-4 font-semibold">Fecha</th>
+                        <th class="px-5 py-4 font-semibold">Fecha de certificación</th>
                         <th class="px-5 py-4 text-right font-semibold">Acciones</th>
                     </tr>
                 </thead>
@@ -141,6 +142,7 @@ new class extends Component
                                 @endif
                             </td>
                             <td class="whitespace-nowrap px-5 py-4 text-slate-600 dark:text-slate-300">{{ $document->created_at?->format('d/m/Y H:i') }}</td>
+                            <td class="whitespace-nowrap px-5 py-4 text-slate-600 dark:text-slate-300"><x-certification-dates :managements="$document->managements" /></td>
                             <td class="whitespace-nowrap px-5 py-4 text-right">
                                 <div class="flex items-center justify-end gap-2">
                                 <a href="{{ route('certificate_documents.download', $document) }}" class="inline-flex items-center justify-center gap-2 rounded-xl border-2 border-slate-950 bg-white px-4 py-2.5 text-sm font-bold text-slate-950 transition hover:bg-slate-950 hover:text-white dark:border-white dark:bg-slate-900 dark:text-white dark:hover:bg-white dark:hover:text-slate-950">
@@ -157,7 +159,7 @@ new class extends Component
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="4" class="px-6 py-14 text-center">
+                            <td colspan="5" class="px-6 py-14 text-center">
                                 <p class="font-semibold">No se encontraron certificados</p>
                                 <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">No existen archivos que coincidan con la búsqueda.</p>
                             </td>

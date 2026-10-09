@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
 
 /**
@@ -34,6 +35,12 @@ class MsCertificado extends Model
     protected $attributes = [
         'status' => CertificateStatus::PendingDispatch->value,
     ];
+
+    /** @return HasMany<CertificateDocument, $this> */
+    public function certificateDocuments(): HasMany
+    {
+        return $this->hasMany(CertificateDocument::class, 'control_number', 'codigo');
+    }
 
     /**
      * @param  Builder<MsCertificado>  $query

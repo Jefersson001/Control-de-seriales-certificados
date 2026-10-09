@@ -154,6 +154,7 @@ new class extends Component
     public function certificates(): LengthAwarePaginator
     {
         $query = MsCertificado::query()
+            ->with('certificateDocuments.managements:id,request_date')
             ->select([
                 'id',
                 'no',
@@ -165,6 +166,7 @@ new class extends Component
                 'niv',
                 'status',
                 'codigo',
+                'created_at',
             ])
             ->search($this->search)
             ->filterByNivStatus($this->recordFilter)
@@ -173,7 +175,7 @@ new class extends Component
         if ($this->recordFilter === 'group_by_certificate') {
             return $query
                 ->select('codigo')
-                ->selectRaw('COUNT(*) as aggregate')
+                ->selectRaw('COUNT(*) as aggregate, MIN(created_at) as created_at')
                 ->groupBy('codigo')
                 ->orderBy('codigo')
                 ->paginate((int) $this->perPage);
@@ -369,6 +371,8 @@ new class extends Component
                     <thead class="bg-slate-50 text-xs uppercase tracking-wider text-slate-500 dark:bg-slate-950/40 dark:text-slate-400">
                         <tr>
                             <th class="px-5 py-4 font-semibold">No Certificado</th>
+                            <th class="px-5 py-4 font-semibold">Fecha de creación</th>
+                            <th class="px-5 py-4 font-semibold">Fecha de certificación</th>
                             <th class="w-48 px-5 py-4 text-right font-semibold">Cantidad</th>
                         </tr>
                     </thead>
@@ -378,6 +382,8 @@ new class extends Component
                                 <td class="px-5 py-4 font-mono font-semibold text-indigo-700 dark:text-indigo-200">
                                     {{ $certificate->codigo }}
                                 </td>
+                                <td class="whitespace-nowrap px-5 py-4 text-slate-600 dark:text-slate-300">{{ $certificate->created_at?->format('d/m/Y H:i') }}</td>
+                                <td class="whitespace-nowrap px-5 py-4 text-slate-600 dark:text-slate-300"><x-certification-dates :managements="$certificate->certificateDocuments->flatMap->managements" /></td>
                                 <td class="px-5 py-4 text-right">
                                     <span class="inline-flex min-w-16 justify-center rounded-full bg-indigo-100 px-3 py-1 text-sm font-semibold text-indigo-700 dark:bg-indigo-400/15 dark:text-indigo-200">
                                         {{ $certificate->aggregate }}
@@ -386,7 +392,7 @@ new class extends Component
                             </tr>
                         @empty
                             <tr>
-                                <td colspan="2" class="px-6 py-14 text-center">
+                                <td colspan="4" class="px-6 py-14 text-center">
                                     <p class="font-semibold">No se encontraron certificados</p>
                                     <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
                                         No existen certificados que coincidan con la búsqueda.
@@ -414,6 +420,8 @@ new class extends Component
                         <th class="px-5 py-4 font-semibold">NIV</th>
                         <th class="px-5 py-4 font-semibold">Status</th>
                         <th class="px-5 py-4 font-semibold">Certificado</th>
+                        <th class="px-5 py-4 font-semibold">Fecha de creación</th>
+                        <th class="px-5 py-4 font-semibold">Fecha de certificación</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100 dark:divide-white/5">
@@ -422,7 +430,7 @@ new class extends Component
                         @if ($recordFilter === 'group_by_certificate' && $currentCertificateGroup !== $certificate->codigo)
                             @php($currentCertificateGroup = $certificate->codigo)
                             <tr wire:key="certificate-group-{{ $certificate->id }}" class="bg-indigo-50 dark:bg-indigo-500/10">
-                                <td colspan="9" class="p-0">
+                                <td colspan="11" class="p-0">
                                     <button
                                         type="button"
                                         class="flex w-full items-center gap-2 px-5 py-3 text-left font-semibold text-indigo-800 transition hover:bg-indigo-100 dark:text-indigo-200 dark:hover:bg-indigo-500/15"
@@ -471,10 +479,12 @@ new class extends Component
                                 ])>{{ $certificate->status->label() }}</span>
                             </td>
                             <td class="whitespace-nowrap px-5 py-4 font-mono text-sm text-slate-600 dark:text-slate-300">{{ $certificate->codigo }}</td>
+                            <td class="whitespace-nowrap px-5 py-4 text-sm text-slate-600 dark:text-slate-300">{{ $certificate->created_at?->format('d/m/Y H:i') }}</td>
+                            <td class="whitespace-nowrap px-5 py-4 text-sm text-slate-600 dark:text-slate-300"><x-certification-dates :managements="$certificate->certificateDocuments->flatMap->managements" /></td>
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="9" class="px-6 py-14 text-center">
+                            <td colspan="11" class="px-6 py-14 text-center">
                                 <p class="font-semibold">No se encontraron certificados</p>
                                 <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
                                     No existen registros que coincidan con la búsqueda.
