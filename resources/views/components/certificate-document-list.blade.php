@@ -1,7 +1,7 @@
 <?php
 
 use App\Actions\Certificates\ApplyCertificateDateFilter;
-
+use App\Actions\Certificates\LoadCertificateDocumentSerialCounts;
 use App\Models\CertificateDocument;
 use App\UserPermission;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -89,21 +89,21 @@ new class extends Component
     {
         $search = trim($this->search);
 
-        return CertificateDocument::query()
+        $documents = CertificateDocument::query()
             ->with('managements:id,request_date')
-            ->when($search !== '', fn ($query) => $query->where(function ($query) use ($search): void {
-                $query
-                    ->where('control_number', 'like', "%{$search}%")
-                    ->orWhere('file_name', 'like', "%{$search}%");
-            }))
+            ->search($search)
             ->tap(fn ($query) => app(ApplyCertificateDateFilter::class)->handle($query, $this->dateField, $this->dateFrom, $this->dateTo))
             ->latest()
             ->paginate($this->perPage);
+
+        app(LoadCertificateDocumentSerialCounts::class)->handle($documents->getCollection());
+
+        return $documents;
     }
 };
 ?>
 
-<div>
+<div wire:poll.15s>
     @if (session('certificateDocumentDeletionResult'))
         <div class="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 font-semibold text-emerald-800 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200">
             {{ session('certificateDocumentDeletionResult') }}
@@ -138,6 +138,15 @@ new class extends Component
                 </div>
             </div>
             <x-per-page-selector id="certificate-documents-per-page" />
+            <a
+                href="{{ route('certificate_documents.export', ['search' => $search, 'dateField' => $dateField, 'dateFrom' => $dateFrom, 'dateTo' => $dateTo]) }}"
+                class="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 font-semibold text-white transition hover:bg-emerald-700 dark:bg-emerald-500 dark:text-slate-950 dark:hover:bg-emerald-400"
+            >
+                <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v12m0 0 4-4m-4 4-4-4M5 17v4h14v-4" />
+                </svg>
+                Exportar Excel
+            </a>
         </div>
 
         <x-certificate-date-filter :field="$dateField" />
@@ -174,8 +183,8 @@ new class extends Component
                                     Sin relación
                                 @endif
                             </td>
-                            <td class="whitespace-nowrap px-5 py-4 text-slate-600 dark:text-slate-300">—</td>
-                            <td class="whitespace-nowrap px-5 py-4 text-slate-600 dark:text-slate-300">—</td>
+                            <td class="whitespace-nowrap px-5 py-4 text-slate-600 dark:text-slate-300">{{ $document->total_serial_count ?? '—' }}</td>
+                            <td class="whitespace-nowrap px-5 py-4 text-slate-600 dark:text-slate-300">{{ $document->processed_serial_count }}</td>
                             <td class="whitespace-nowrap px-5 py-4 text-slate-600 dark:text-slate-300">{{ $document->created_at?->format('d/m/Y H:i') }}</td>
                             <td class="whitespace-nowrap px-5 py-4 text-slate-600 dark:text-slate-300"><x-certification-dates :managements="$document->managements" /></td>
                             <td class="whitespace-nowrap px-5 py-4 text-sm text-slate-600 dark:text-slate-300">{{ $document->issued_on?->format('d/m/Y') ?? 'Sin registrar' }}</td>

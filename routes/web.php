@@ -3,6 +3,7 @@
 use App\Http\Controllers\Auth\AuthenticateUserController;
 use App\Http\Controllers\Auth\LogoutUserController;
 use App\Http\Controllers\CertificateDocumentDownloadController;
+use App\Http\Controllers\CertificateDocumentExportController;
 use App\Http\Controllers\CertificateExportController;
 use App\Http\Controllers\DispatchCertificatePrintController;
 use App\Http\Controllers\DispatchController;
@@ -59,6 +60,9 @@ Route::get('/maestro-seriales-certificados/exportar', CertificateExportControlle
 Route::view('/certificados', 'certificate-documents.index')
     ->middleware(['auth', 'password.not_expired', 'permission:certificate-documents.view'])
     ->name('certificate_documents.index');
+Route::get('/certificados/exportar', CertificateDocumentExportController::class)
+    ->middleware(['auth', 'password.not_expired', 'permission:certificate-documents.view'])
+    ->name('certificate_documents.export');
 Route::get('/certificados/{certificateDocument}/descargar', CertificateDocumentDownloadController::class)
     ->middleware(['auth', 'password.not_expired', 'permission:certificate-documents.view'])
     ->name('certificate_documents.download');

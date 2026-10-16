@@ -191,6 +191,7 @@ class ImportManagementCertificateAnalysis
                         $certificate->control_number,
                         $management->id,
                         $certificate->issued_on?->format('Y-m-d'),
+                        $certificate->valid_occurrence_count + $certificate->invalid_count,
                     );
 
                     if ($document->wasRecentlyCreated) {

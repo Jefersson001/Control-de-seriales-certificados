@@ -11,7 +11,7 @@ use Throwable;
 
 class StoreCertificateDocument
 {
-    public function handle(UploadedFile $pdf, string $controlNumber, ?int $managementId = null, ?string $issuedOn = null): CertificateDocument
+    public function handle(UploadedFile $pdf, string $controlNumber, ?int $managementId = null, ?string $issuedOn = null, ?int $totalSerialCount = null): CertificateDocument
     {
         return $this->storeOnce(
             $controlNumber, $pdf->getClientOriginalName(), $managementId,
@@ -19,6 +19,7 @@ class StoreCertificateDocument
                 dirname($path), $pdf, basename($path),
             ),
             $issuedOn,
+            $totalSerialCount,
         );
     }
 
@@ -28,25 +29,25 @@ class StoreCertificateDocument
         string $controlNumber,
         int $managementId,
         ?string $issuedOn = null,
+        ?int $totalSerialCount = null,
     ): CertificateDocument {
         return $this->storeOnce(
             $controlNumber, $originalFileName, $managementId,
             function (string $path) use ($sourcePath): bool {
                 $stream = Storage::disk('local')->readStream($sourcePath);
 
-                if ($stream === false) {
+                if (! is_resource($stream)) {
                     return false;
                 }
 
                 try {
-                    return Storage::disk('local')->put($path, $stream);
+                    return (bool) Storage::disk('local')->put($path, $stream);
                 } finally {
-                    if (is_resource($stream)) {
-                        fclose($stream);
-                    }
+                    fclose($stream);
                 }
             },
             $issuedOn,
+            $totalSerialCount,
         );
     }
 
@@ -57,18 +58,23 @@ class StoreCertificateDocument
         ?int $managementId,
         callable $writeFile,
         ?string $issuedOn = null,
+        ?int $totalSerialCount = null,
     ): CertificateDocument {
         $normalizedControlNumber = Str::upper(trim($controlNumber));
 
         return Cache::lock('certificate-document:'.hash('sha256', $normalizedControlNumber), 15)->block(
             5,
-            function () use ($normalizedControlNumber, $originalFileName, $managementId, $writeFile, $issuedOn): CertificateDocument {
+            function () use ($normalizedControlNumber, $originalFileName, $managementId, $writeFile, $issuedOn, $totalSerialCount): CertificateDocument {
                 $existing = CertificateDocument::query()
                     ->whereRaw('UPPER(TRIM(control_number)) = ?', [$normalizedControlNumber])
                     ->oldest('id')
                     ->first();
 
                 if ($existing !== null) {
+                    if ($totalSerialCount !== null && $existing->total_serial_count === null) {
+                        $existing->update(['total_serial_count' => $totalSerialCount]);
+                    }
+
                     if ($issuedOn !== null && $existing->issued_on === null) {
                         $existing->update(['issued_on' => $issuedOn]);
                     }
@@ -100,6 +106,7 @@ class StoreCertificateDocument
                         'file_name' => $downloadName,
                         'original_file_name' => $originalFileName,
                         'file_path' => $path,
+                        'total_serial_count' => $totalSerialCount,
                     ]);
 
                     if ($managementId !== null) {

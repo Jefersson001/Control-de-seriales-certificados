@@ -112,6 +112,7 @@ test('confirming the pdf import creates its unrelated certificate document', fun
     $document = CertificateDocument::query()->sole();
 
     expect($document->file_name)->toBe('DG-NIV-RG5-0999-PC.pdf')
+        ->and($document->total_serial_count)->toBe(1)
         ->and($document->imported_without_management)->toBeTrue()
         ->and($document->managements()->count())->toBe(0);
     Storage::disk('local')->assertExists($document->file_path);

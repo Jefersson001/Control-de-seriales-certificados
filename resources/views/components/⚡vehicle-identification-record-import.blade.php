@@ -118,7 +118,12 @@ new class extends Component
             $this->includeDuplicates,
             $this->includeInvalid,
         );
-        $storeCertificateDocument->handle($this->pdfFile, $analysis['controlNumber'], issuedOn: $analysis['issuedOn'] ?? null);
+        $storeCertificateDocument->handle(
+            $this->pdfFile,
+            $analysis['controlNumber'],
+            issuedOn: $analysis['issuedOn'] ?? null,
+            totalSerialCount: count($analysis['records']) + $analysis['duplicateCount'] + $analysis['invalidCount'],
+        );
 
         $this->reset(['pdfFile']);
         $this->resetPreview();
