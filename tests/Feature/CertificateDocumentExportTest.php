@@ -1,7 +1,9 @@
 <?php
 
 use App\Actions\Certificates\ImportCertificatesFromPdf;
+use App\CertificateStatus;
 use App\Models\CertificateDocument;
+use App\Models\MsCertificado;
 use App\Models\User;
 use App\Models\VehicleIdentificationRecordCertificateSerial;
 use App\Models\VehicleIdentificationRecordManagement;
@@ -35,18 +37,21 @@ test('the excel report contains every displayed field including current serial c
         'valid_occurrence_count' => 1000,
     ]);
     $this->document->managements()->attach($management);
-    VehicleIdentificationRecordCertificateSerial::factory()->create([
+    VehicleIdentificationRecordCertificateSerial::factory()->count(3)->create([
         'certificate_id' => $certificate->id,
         'imported_at' => now(),
     ]);
+    foreach (CertificateStatus::cases() as $status) {
+        MsCertificado::factory()->create(['codigo' => $this->document->control_number, 'status' => $status]);
+    }
 
     $response = $this->actingAs($this->user)->get(route('certificate_documents.export'));
     $response->assertSuccessful()->assertDownload('reporte-certificados-'.now()->format('Y-m-d').'.xlsx');
     $rows = readCertificateDocumentReport($response->baseResponse);
 
     expect($rows)->toBe([
-        ['Certificado', 'Gestión', 'Cantidad de Seriales en el Certificados', 'Cantidad de Seriales Certificados Procesados', 'Fecha', 'Fecha de certificación', 'Fecha de emisión'],
-        ['CERT-REPORTE', 'Gestión #'.$management->id, 1000, 1, '15/01/2026 10:30', '10/01/2026', '12/01/2026'],
+        ['Certificado', 'Gestión', 'Cantidad de Seriales en el Certificados', 'Cantidad de Seriales Certificados Procesados', 'Seriales despachados', 'Seriales por despachar', 'Seriales devueltos', 'Fecha', 'Fecha de certificación', 'Fecha de emisión'],
+        ['CERT-REPORTE', 'Gestión #'.$management->id, 1000, 3, 1, 1, 1, '15/01/2026 10:30', '10/01/2026', '12/01/2026'],
     ]);
 });
 
@@ -70,8 +75,9 @@ test('the report exports all pages and represents missing information as in the 
         ->and($rows[1][1])->toBe('Sin relación')
         ->and($rows[1][2])->toBe('—')
         ->and($rows[1][3])->toBe(0)
-        ->and($rows[1][5])->toBe('Sin registrar')
-        ->and($rows[1][6])->toBe('Sin registrar');
+        ->and(array_slice($rows[1], 4, 3))->toBe([0, 0, 0])
+        ->and($rows[1][8])->toBe('Sin registrar')
+        ->and($rows[1][9])->toBe('Sin registrar');
 });
 
 test('the report respects search and each date filter', function (string $dateField) {
@@ -131,8 +137,8 @@ test('the report excludes the pdf filename column', function () {
     $response->assertSuccessful();
     $rows = readCertificateDocumentReport($response->baseResponse);
 
-    expect($rows[0])->toHaveCount(7)->not->toContain('Archivo PDF')
-        ->and($rows[1])->toHaveCount(7)->not->toContain('=1+1.pdf');
+    expect($rows[0])->toHaveCount(10)->not->toContain('Archivo PDF')
+        ->and($rows[1])->toHaveCount(10)->not->toContain('=1+1.pdf');
 });
 
 test('the certificate report requires the document viewing permission', function () {

@@ -4,8 +4,13 @@ use App\Actions\Certificates\ImportCertificatesFromPdf;
 use App\Actions\Certificates\LoadCertificateDocumentSerialCounts;
 use App\Actions\Certificates\RecoverCertificateSerialCount;
 use App\Actions\Certificates\StoreCertificateDocument;
+use App\Actions\Dispatches\FinalizeDispatch;
+use App\Actions\Returns\FinalizeReturn;
+use App\CertificateStatus;
 use App\Models\CertificateDocument;
+use App\Models\Dispatch;
 use App\Models\MsCertificado;
+use App\Models\ProductReturn;
 use App\Models\User;
 use App\Models\VehicleIdentificationRecordCertificateSerial;
 use App\Models\VehicleIdentificationRecordManagement;
@@ -195,4 +200,82 @@ test('imports store the complete pdf total and preserve it across partial manage
     $store->handle($pdf, 'TOTAL-1000', $management->id, totalSerialCount: 500);
 
     expect($document->fresh()->total_serial_count)->toBe(1000);
+});
+
+test('certificate dispatch counts use registered serial states and exclude other certificates and blank serials', function () {
+    $document = new CertificateDocument(['control_number' => 'ESTADOS', 'total_serial_count' => 1000]);
+    foreach (CertificateStatus::cases() as $status) {
+        MsCertificado::factory()->create(['codigo' => 'ESTADOS', 'status' => $status]);
+        MsCertificado::factory()->create(['codigo' => 'OTRO', 'status' => $status]);
+    }
+    MsCertificado::factory()->create(['codigo' => 'ESTADOS', 'niv' => '   ', 'status' => CertificateStatus::Dispatched]);
+
+    app(LoadCertificateDocumentSerialCounts::class)->handle(collect([$document]));
+
+    expect($document->dispatched_serial_count)->toBe(1)
+        ->and($document->pending_dispatch_serial_count)->toBe(1)
+        ->and($document->returned_serial_count)->toBe(1);
+});
+
+test('duplicate motorcycle serials are counted once using their most recently updated record', function () {
+    $document = new CertificateDocument(['control_number' => 'DUPLICADO', 'total_serial_count' => 1]);
+    $record = MsCertificado::factory()->create([
+        'codigo' => 'DUPLICADO', 'niv' => '8YZC7MCC0TD000001',
+        'status' => CertificateStatus::Dispatched, 'updated_at' => '2026-01-02',
+    ]);
+    MsCertificado::factory()->create([
+        'codigo' => 'DUPLICADO', 'niv' => ' 8yzc7mcc0td000001 ',
+        'status' => CertificateStatus::PendingDispatch, 'updated_at' => '2026-01-01',
+    ]);
+    $counts = app(LoadCertificateDocumentSerialCounts::class);
+    $counts->handle(collect([$document]));
+
+    expect($document->dispatched_serial_count)->toBe(1)
+        ->and($document->pending_dispatch_serial_count)->toBe(0)
+        ->and($document->returned_serial_count)->toBe(0);
+
+    $record->update(['status' => CertificateStatus::Returned, 'updated_at' => '2026-01-03']);
+    $counts->handle(collect([$document]));
+
+    expect($document->dispatched_serial_count)->toBe(0)
+        ->and($document->pending_dispatch_serial_count)->toBe(0)
+        ->and($document->returned_serial_count)->toBe(1);
+});
+
+test('the certificate list follows finalized dispatches returns and redispatches without adding historical movements', function () {
+    $user = User::factory()->create(['permissions' => [UserPermission::ViewCertificateDocuments->value]]);
+    $document = CertificateDocument::query()->create([
+        'control_number' => 'MOVIMIENTOS', 'file_name' => 'movimientos.pdf',
+        'original_file_name' => 'movimientos.pdf', 'file_path' => 'movimientos.pdf',
+        'total_serial_count' => 1,
+    ]);
+    $record = MsCertificado::factory()->create(['codigo' => $document->control_number]);
+    $this->actingAs($user);
+    $component = Livewire::test('certificate-document-list')
+        ->assertSeeInOrder(['Seriales despachados', 'Seriales por despachar', 'Seriales devueltos'])
+        ->assertSet('documents', fn ($documents): bool => $documents->sole()->pending_dispatch_serial_count === 1);
+
+    $dispatch = Dispatch::query()->create(['name' => 'Primer despacho']);
+    $dispatch->lines()->create(['ms_certificado_id' => $record->id]);
+    $component->call('$refresh')
+        ->assertSet('documents', fn ($documents): bool => $documents->sole()->dispatched_serial_count === 0);
+    app(FinalizeDispatch::class)->handle($dispatch);
+    $component->call('$refresh')
+        ->assertSet('documents', fn ($documents): bool => $documents->sole()->dispatched_serial_count === 1
+            && $documents->sole()->pending_dispatch_serial_count === 0);
+
+    $return = ProductReturn::factory()->create();
+    $return->lines()->create(['ms_certificado_id' => $record->id]);
+    app(FinalizeReturn::class)->handle($return);
+    $component->call('$refresh')
+        ->assertSet('documents', fn ($documents): bool => $documents->sole()->dispatched_serial_count === 0
+            && $documents->sole()->returned_serial_count === 1);
+
+    $redispatch = Dispatch::query()->create(['name' => 'Segundo despacho']);
+    $redispatch->lines()->create(['ms_certificado_id' => $record->id]);
+    app(FinalizeDispatch::class)->handle($redispatch);
+    $component->call('$refresh')
+        ->assertSet('documents', fn ($documents): bool => $documents->sole()->dispatched_serial_count === 1
+            && $documents->sole()->returned_serial_count === 0
+            && $documents->sole()->pending_dispatch_serial_count === 0);
 });

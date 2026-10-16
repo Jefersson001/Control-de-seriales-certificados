@@ -13,6 +13,9 @@ use Illuminate\Support\Facades\Storage;
 /**
  * @property CarbonInterface|null $issued_on
  * @property-read int $processed_serial_count
+ * @property-read int $dispatched_serial_count
+ * @property-read int $pending_dispatch_serial_count
+ * @property-read int $returned_serial_count
  */
 #[Fillable([
     'uploaded_by',

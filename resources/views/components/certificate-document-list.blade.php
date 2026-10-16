@@ -159,6 +159,9 @@ new class extends Component
                         <th class="px-5 py-4 font-semibold">Gestión</th>
                         <th class="px-5 py-4 font-semibold">Cantidad de Seriales en el Certificados</th>
                         <th class="px-5 py-4 font-semibold">Cantidad de Seriales Certificados Procesados</th>
+                        <th class="px-5 py-4 font-semibold">Seriales despachados</th>
+                        <th class="px-5 py-4 font-semibold">Seriales por despachar</th>
+                        <th class="px-5 py-4 font-semibold">Seriales devueltos</th>
                         <th class="px-5 py-4 font-semibold">Fecha</th>
                         <th class="px-5 py-4 font-semibold">Fecha de certificación</th>
                         <th class="px-5 py-4 font-semibold">Fecha de emisión</th>
@@ -185,6 +188,9 @@ new class extends Component
                             </td>
                             <td class="whitespace-nowrap px-5 py-4 text-slate-600 dark:text-slate-300">{{ $document->total_serial_count ?? '—' }}</td>
                             <td class="whitespace-nowrap px-5 py-4 text-slate-600 dark:text-slate-300">{{ $document->processed_serial_count }}</td>
+                            <td class="whitespace-nowrap px-5 py-4 text-slate-600 dark:text-slate-300">{{ $document->dispatched_serial_count }}</td>
+                            <td class="whitespace-nowrap px-5 py-4 text-slate-600 dark:text-slate-300">{{ $document->pending_dispatch_serial_count }}</td>
+                            <td class="whitespace-nowrap px-5 py-4 text-slate-600 dark:text-slate-300">{{ $document->returned_serial_count }}</td>
                             <td class="whitespace-nowrap px-5 py-4 text-slate-600 dark:text-slate-300">{{ $document->created_at?->format('d/m/Y H:i') }}</td>
                             <td class="whitespace-nowrap px-5 py-4 text-slate-600 dark:text-slate-300"><x-certification-dates :managements="$document->managements" /></td>
                             <td class="whitespace-nowrap px-5 py-4 text-sm text-slate-600 dark:text-slate-300">{{ $document->issued_on?->format('d/m/Y') ?? 'Sin registrar' }}</td>
@@ -204,7 +210,7 @@ new class extends Component
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="8" class="px-6 py-14 text-center">
+                            <td colspan="11" class="px-6 py-14 text-center">
                                 <p class="font-semibold">No se encontraron certificados</p>
                                 <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">No existen archivos que coincidan con la búsqueda.</p>
                             </td>
