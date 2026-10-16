@@ -141,6 +141,13 @@ test('authorized users can search and download certificate documents', function 
     $this->actingAs($user);
 
     Livewire::test('certificate-document-list')
+        ->assertSeeInOrder([
+            'Gestión',
+            'Cantidad de Seriales en el Certificados',
+            'Cantidad de Seriales Certificados Procesados',
+            'Fecha',
+        ])
+        ->assertSee('—')
         ->assertSee('DG-NIV-RG5-0175-PC')
         ->assertSee('OTRO-CERTIFICADO')
         ->assertSee('Sin relación')
