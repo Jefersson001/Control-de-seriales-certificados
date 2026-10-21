@@ -7,6 +7,7 @@ use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Locked;
+use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
 
@@ -16,6 +17,7 @@ new class extends Component
 
     public string $search = '';
 
+    #[Url(as: 'status', except: 'all')]
     public string $statusFilter = 'all';
 
     public $perPage = 10;
@@ -33,6 +35,10 @@ new class extends Component
     public function mount(): void
     {
         $this->authorizePermission(UserPermission::ViewMotorcycleSerialRequests);
+
+        if (MotorcycleSerialRequestStatus::tryFrom($this->statusFilter) === null) {
+            $this->statusFilter = 'all';
+        }
     }
 
     public function updatedSearch(): void

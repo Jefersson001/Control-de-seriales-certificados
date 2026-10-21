@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\SQLiteConnection;
 use Illuminate\Support\Carbon;
 
 /**
@@ -94,21 +95,28 @@ class MsCertificado extends Model
                 $query->whereRaw('LENGTH(TRIM(niv)) <> 17');
             })
             ->when($filter === 'invalid_records', function (Builder $query): void {
-                $query->where(function (Builder $query): void {
+                $usesSqlite = $query->getConnection() instanceof SQLiteConnection;
+                $numberValidation = $usesSqlite ? '"no" GLOB ?' : '`no` REGEXP ?';
+                $manufacturingValidation = $usesSqlite ? '"fabricacion" GLOB ?' : '`fabricacion` REGEXP ?';
+                $nivValidation = $usesSqlite ? 'UPPER(niv) GLOB ?' : 'UPPER(niv) REGEXP ?';
+                $numericPattern = $usesSqlite ? '*[^0-9]*' : '[^0-9]';
+                $nivPattern = $usesSqlite ? '*[^A-HJ-NPR-Z0-9]*' : '[^A-HJ-NPR-Z0-9]';
+
+                $query->where(function (Builder $query) use ($numberValidation, $manufacturingValidation, $nivValidation, $numericPattern, $nivPattern): void {
                     $query
                         ->where('no', '')
-                        ->orWhereRaw("no GLOB '*[^0-9]*'")
+                        ->orWhereRaw($numberValidation, [$numericPattern])
                         ->orWhere('marca', '')
                         ->orWhere('modelo', '')
                         ->orWhere('tipo', '')
                         ->orWhere('fabricacion', '')
                         ->orWhereRaw('LENGTH(TRIM(fabricacion)) <> 4')
-                        ->orWhereRaw("fabricacion GLOB '*[^0-9]*'")
+                        ->orWhereRaw($manufacturingValidation, [$numericPattern])
                         ->orWhere('anio', '<', 1000)
                         ->orWhere('anio', '>', 9999)
                         ->orWhere('niv', '')
                         ->orWhereRaw('LENGTH(TRIM(niv)) <> 17')
-                        ->orWhereRaw("UPPER(niv) GLOB '*[^A-HJ-NPR-Z0-9]*'")
+                        ->orWhereRaw($nivValidation, [$nivPattern])
                         ->orWhere('codigo', '');
                 });
             });

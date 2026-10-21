@@ -7,6 +7,7 @@ use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Locked;
+use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
 
@@ -15,6 +16,7 @@ new class extends Component
     use WithPagination;
 
     public string $search = '';
+    #[Url(as: 'status', except: 'all')]
     public string $statusFilter = 'all';
     public int $perPage = 10;
 
@@ -29,6 +31,10 @@ new class extends Component
     public function mount(): void
     {
         abort_unless(auth()->user()?->hasPermission(UserPermission::ViewDispatches), 403);
+
+        if (DispatchStatus::tryFrom($this->statusFilter) === null) {
+            $this->statusFilter = 'all';
+        }
     }
 
     public function updatedSearch(): void

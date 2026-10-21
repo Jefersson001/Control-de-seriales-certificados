@@ -37,6 +37,22 @@
                 </p>
 
                 <nav data-sidebar-menu class="mt-4 flex flex-col gap-2 pr-1" aria-label="Navegación del sistema">
+                    <a
+                        data-dashboard-home
+                        href="{{ route('dashboard') }}"
+                        @if (request()->routeIs('dashboard')) aria-current="page" @endif
+                        @class([
+                            'flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition',
+                            'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300' => request()->routeIs('dashboard'),
+                            'text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-white' => ! request()->routeIs('dashboard'),
+                        ])
+                    >
+                        <svg class="size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="m3 10 9-7 9 7M5 9v12h5v-7h4v7h5V9"/>
+                        </svg>
+                        <span>Resumen general</span>
+                    </a>
+
                     @if (auth()->user()->hasPermission(App\UserPermission::ViewVehicleIdentificationRecord))
                         <a
                             href="{{ route('vehicle_identification_records.index') }}"

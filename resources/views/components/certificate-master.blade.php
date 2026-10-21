@@ -8,6 +8,7 @@ use App\UserPermission;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Locked;
+use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithFileUploads;
 use Livewire\WithPagination;
@@ -55,8 +56,10 @@ new class extends Component
 
     public $perPage = 10;
 
+    #[Url(as: 'records', except: 'all')]
     public string $recordFilter = 'all';
 
+    #[Url(as: 'status', except: 'all')]
     public string $statusFilter = 'all';
 
     public bool $showDeleteConfirmation = false;
@@ -80,6 +83,14 @@ new class extends Component
     public function mount(): void
     {
         abort_unless(auth()->user()?->hasPermission(UserPermission::ViewCertificates), 403);
+
+        if (! in_array($this->recordFilter, ['all', 'duplicates', 'unique_niv', 'invalid_niv_length', 'invalid_records', 'group_by_certificate'], true)) {
+            $this->recordFilter = 'all';
+        }
+
+        if (CertificateStatus::tryFrom($this->statusFilter) === null) {
+            $this->statusFilter = 'all';
+        }
     }
 
     public function updatedSearch(): void

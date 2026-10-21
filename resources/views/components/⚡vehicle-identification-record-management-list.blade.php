@@ -6,6 +6,7 @@ use App\VehicleIdentificationRecordManagementStatus;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
 
@@ -15,11 +16,28 @@ new class extends Component
 
     public string $search = '';
 
+    #[Url(as: 'status', except: 'all')]
+    public string $statusFilter = 'all';
+
     public $perPage = 10;
 
     public function mount(): void
     {
         abort_unless(auth()->user()?->hasPermission(UserPermission::ViewVehicleIdentificationRecordManagement), 403);
+
+        if (VehicleIdentificationRecordManagementStatus::tryFrom($this->statusFilter) === null) {
+            $this->statusFilter = 'all';
+        }
+    }
+
+    public function updatedStatusFilter(): void
+    {
+        if (VehicleIdentificationRecordManagementStatus::tryFrom($this->statusFilter) === null) {
+            $this->statusFilter = 'all';
+        }
+
+        $this->resetPage();
+        unset($this->records);
     }
 
     public function updatedSearch(): void
@@ -39,6 +57,10 @@ new class extends Component
         $search = trim($this->search);
 
         return VehicleIdentificationRecordManagement::query()
+            ->when(
+                VehicleIdentificationRecordManagementStatus::tryFrom($this->statusFilter) !== null,
+                fn (Builder $query): Builder => $query->where('status', $this->statusFilter),
+            )
             ->with([
                 'motorcycleSerialRequest.lines:id,motorcycle_serial_request_id,quantity',
                 'motorcycleSerialRequest.user:id,name',
@@ -78,6 +100,15 @@ new class extends Component
                 <input id="management-search" wire:model.live.debounce.300ms="search" type="search" placeholder="Buscar por gestión, solicitud o usuario..." class="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-12 pr-4 text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-500/10 dark:border-white/10 dark:bg-slate-950/60 dark:text-white">
                 <span wire:loading wire:target="search" class="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-medium text-emerald-600 dark:text-emerald-300">Buscando...</span>
                 </div>
+            </div>
+            <div class="w-full sm:max-w-xs">
+                <label for="management-status-filter" class="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-500">Filtrar por estado</label>
+                <select id="management-status-filter" wire:model.live="statusFilter" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-500/10 dark:border-white/10 dark:bg-slate-950/60">
+                    <option value="all">Todos los estados</option>
+                    @foreach (VehicleIdentificationRecordManagementStatus::cases() as $status)
+                        <option value="{{ $status->value }}">{{ $status->label() }}</option>
+                    @endforeach
+                </select>
             </div>
             <x-per-page-selector id="management-records-per-page" />
         </div>

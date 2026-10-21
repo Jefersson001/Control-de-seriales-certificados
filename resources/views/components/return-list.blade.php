@@ -7,6 +7,7 @@ use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Locked;
+use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
 
@@ -15,6 +16,10 @@ new class extends Component
     use WithPagination;
 
     public string $search = '';
+
+    #[Url(as: 'status', except: 'all')]
+    public string $statusFilter = 'all';
+
     public int $perPage = 10;
 
     public bool $showDeleteConfirmation = false;
@@ -28,6 +33,20 @@ new class extends Component
     public function mount(): void
     {
         abort_unless(auth()->user()?->hasPermission(UserPermission::ViewReturns), 403);
+
+        if (ReturnStatus::tryFrom($this->statusFilter) === null) {
+            $this->statusFilter = 'all';
+        }
+    }
+
+    public function updatedStatusFilter(): void
+    {
+        if (ReturnStatus::tryFrom($this->statusFilter) === null) {
+            $this->statusFilter = 'all';
+        }
+
+        $this->resetPage();
+        unset($this->returns);
     }
 
     public function updatedSearch(): void
@@ -47,6 +66,10 @@ new class extends Component
         $search = trim($this->search);
 
         return ProductReturn::query()
+            ->when(
+                ReturnStatus::tryFrom($this->statusFilter) !== null,
+                fn (Builder $query): Builder => $query->where('status', $this->statusFilter),
+            )
             ->with('creator:id,name')
             ->withCount('lines')
             ->when($search !== '', fn (Builder $query) => $query->where(function (Builder $query) use ($search): void {
@@ -110,6 +133,15 @@ new class extends Component
             <div class="w-full max-w-lg">
                 <label for="return-search" class="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-500">Buscar</label>
                 <input id="return-search" wire:model.live.debounce.300ms="search" type="search" placeholder="Nombre de Odoo o usuario..." class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:border-amber-400 focus:ring-4 focus:ring-amber-500/10 dark:border-white/10 dark:bg-slate-950/60">
+            </div>
+            <div class="w-full sm:max-w-xs">
+                <label for="return-status-filter" class="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-500">Filtrar por estado</label>
+                <select id="return-status-filter" wire:model.live="statusFilter" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:border-amber-400 focus:ring-4 focus:ring-amber-500/10 dark:border-white/10 dark:bg-slate-950/60">
+                    <option value="all">Todos los estados</option>
+                    @foreach (ReturnStatus::cases() as $status)
+                        <option value="{{ $status->value }}">{{ $status->label() }}</option>
+                    @endforeach
+                </select>
             </div>
             <x-per-page-selector id="returns-per-page" />
         </div>
