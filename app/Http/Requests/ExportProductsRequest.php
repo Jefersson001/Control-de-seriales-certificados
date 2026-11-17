@@ -4,6 +4,7 @@ namespace App\Http\Requests;
 
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class ExportProductsRequest extends FormRequest
 {
@@ -24,6 +25,7 @@ class ExportProductsRequest extends FormRequest
     {
         return [
             'search' => ['nullable', 'string', 'max:255'],
+            'category' => ['nullable', 'string', Rule::in(['nacional', 'importados'])],
         ];
     }
 }

@@ -42,14 +42,18 @@ test('product import rejects unexpected excel headers', function () {
     @unlink($filePath);
 });
 
-test('authorized users can export the filtered products to xlsx', function () {
+test('authorized users can export the filtered products to xlsx', function (string $category) {
     $user = User::factory()->create([
         'permissions' => [UserPermission::ViewProducts->value],
     ]);
-    Product::factory()->create(['name' => 'Moto encontrada', 'niv' => 'NIV-BUSCADO', 'year' => 2026]);
-    Product::factory()->create(['name' => 'Producto oculto', 'niv' => 'NIV-OCULTO']);
+    Product::factory()->create(['name' => 'Moto encontrada', 'niv' => 'NIV-BUSCADO', 'year' => 2026, 'category' => $category ?: 'nacional']);
+    Product::factory()->create([
+        'name' => 'Producto oculto',
+        'niv' => $category === '' ? 'NIV-OCULTO' : 'NIV-BUSCADO',
+        'category' => $category === 'nacional' ? 'importados' : 'nacional',
+    ]);
 
-    $response = $this->actingAs($user)->get(route('products.export', ['search' => 'NIV-BUSCADO']));
+    $response = $this->actingAs($user)->get(route('products.export', ['search' => 'NIV-BUSCADO', 'category' => $category]));
 
     $response->assertSuccessful();
     expect($response->headers->get('content-type'))
@@ -73,14 +77,14 @@ test('authorized users can export the filtered products to xlsx', function () {
         ->and($rows[0])->toBe(['Descripción', '1ero', '2do', 'NIV', 'Año'])
         ->and($rows[1][0])->toBe('Moto encontrada')
         ->and($rows[1][3])->toBe('NIV-BUSCADO');
-});
+})->with(['', 'nacional', 'importados']);
 
 test('guests cannot export products', function () {
     $this->get(route('products.export'))->assertRedirect(route('login'));
 });
 
 /** @param list<list<mixed>> $rows
- *  @param list<mixed> $headers
+ * @param  list<mixed>  $headers
  */
 function createProductsWorkbook(
     array $rows,

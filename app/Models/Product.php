@@ -12,6 +12,8 @@ use Illuminate\Support\Carbon;
 /**
  * @property int $id
  * @property string $name
+ * @property string $category
+ * @property string $brand
  * @property string|null $first_value
  * @property string|null $second_value
  * @property string|null $niv
@@ -19,11 +21,17 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
-#[Fillable(['name', 'first_value', 'second_value', 'niv', 'year'])]
+#[Fillable(['name', 'category', 'brand', 'first_value', 'second_value', 'niv', 'year'])]
 class Product extends Model
 {
     /** @use HasFactory<ProductFactory> */
     use HasFactory;
+
+    /** @var array<string, mixed> */
+    protected $attributes = [
+        'category' => 'nacional',
+        'brand' => 'bera',
+    ];
 
     /** @return array<string, string> */
     protected function casts(): array

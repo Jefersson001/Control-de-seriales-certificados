@@ -17,6 +17,7 @@ class ProductExportController extends Controller
     public function __invoke(ExportProductsRequest $request): BinaryFileResponse
     {
         $search = trim((string) ($request->validated('search') ?? ''));
+        $category = $request->validated('category');
         $temporaryFile = tempnam(sys_get_temp_dir(), 'productos-');
 
         abort_if($temporaryFile === false, 500, 'No se pudo preparar el archivo de exportación.');
@@ -30,6 +31,7 @@ class ProductExportController extends Controller
 
         foreach (
             Product::query()
+                ->when($category !== null, fn (Builder $query) => $query->where('category', $category))
                 ->when($search !== '', fn (Builder $query) => $query->where(function (Builder $query) use ($search): void {
                     $query->where('name', 'like', "%{$search}%")
                         ->orWhere('first_value', 'like', "%{$search}%")

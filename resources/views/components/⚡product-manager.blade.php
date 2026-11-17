@@ -5,6 +5,7 @@ use App\Actions\Products\ImportProducts;
 use App\UserPermission;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Locked;
@@ -18,6 +19,8 @@ new class extends Component
     use WithFileUploads;
 
     public string $search = '';
+
+    public string $categoryFilter = '';
 
     public $perPage = 10;
 
@@ -41,6 +44,10 @@ new class extends Component
     public string $deletingProductName = '';
 
     public string $description = '';
+
+    public string $category = 'nacional';
+
+    public string $brand = 'bera';
 
     public string $firstValue = '';
 
@@ -81,6 +88,30 @@ new class extends Component
         $this->resetPage();
     }
 
+    public function updatedCategoryFilter(): void
+    {
+        $this->resetPage();
+    }
+
+    public function updatedBrand(): void
+    {
+        if ($this->brand === 'zontes' && $this->firstValue === '') {
+            $this->firstValue = 'LD3';
+        }
+
+        $this->synchronizeZontesNiv();
+    }
+
+    public function updatedFirstValue(): void
+    {
+        $this->synchronizeZontesNiv();
+    }
+
+    public function updatedSecondValue(): void
+    {
+        $this->synchronizeZontesNiv();
+    }
+
     public function updatedPerPage(mixed $value): void
     {
         $this->perPage = is_numeric($value) ? max(1, min((int) $value, 10000)) : 10;
@@ -93,7 +124,8 @@ new class extends Component
         $search = trim($this->search);
 
         return Product::query()
-            ->select(['id', 'name', 'first_value', 'second_value', 'niv', 'year', 'created_at', 'updated_at'])
+            ->select(['id', 'name', 'category', 'brand', 'created_at', 'updated_at'])
+            ->when($this->categoryFilter !== '', fn (Builder $query) => $query->where('category', $this->categoryFilter))
             ->when($search !== '', function (Builder $query) use ($search): void {
                 $query->where(function (Builder $query) use ($search): void {
                     $query->where('name', 'like', "%{$search}%")
@@ -136,6 +168,7 @@ new class extends Component
         $this->authorizePermission($requiredPermission);
 
         $this->description = trim($this->description);
+        $this->synchronizeZontesNiv();
         $nameRule = Rule::unique((new Product)->getTable(), 'name');
 
         if ($this->editingProductId !== null) {
@@ -144,20 +177,32 @@ new class extends Component
 
         $validated = $this->validate([
             'description' => ['required', 'string', 'max:255', $nameRule],
-            'firstValue' => ['nullable', 'string', 'max:255'],
-            'secondValue' => ['nullable', 'string', 'max:255'],
+            'category' => ['required', 'string', Rule::in(['nacional', 'importados'])],
+            'brand' => ['required', 'string', Rule::in(['bera', 'zontes', 'morini'])],
+            'firstValue' => [Rule::when($this->brand === 'zontes', ['required', Rule::in(['LD3'])], ['nullable']), 'string', 'max:255'],
+            'secondValue' => [Rule::when($this->brand === 'zontes', ['required', 'regex:/^[A-HJ-NPR-Z0-9]{5}$/'], ['nullable']), 'string', 'max:255'],
             'niv' => ['nullable', 'string', 'max:50'],
         ], [
             'description.required' => 'Ingresa la descripción del producto.',
+            'category.required' => 'Selecciona la categoría del producto.',
+            'category.in' => 'La categoría debe ser Nacional o Importados.',
+            'brand.in' => 'La marca debe ser Bera, Zontes o Morini.',
+            'brand.required' => 'Selecciona la marca del producto.',
             'description.unique' => 'Ya existe un producto con esta descripción.',
             'description.max' => 'La descripción no puede superar los 255 caracteres.',
             'firstValue.max' => 'El campo 1ero no puede superar los 255 caracteres.',
+            'firstValue.required' => 'Ingresa LD3 en el campo 1ero para Zontes.',
+            'firstValue.in' => 'El campo 1ero debe ser LD3 para Zontes.',
             'secondValue.max' => 'El campo 2do no puede superar los 255 caracteres.',
+            'secondValue.required' => 'Ingresa el código del modelo Zontes en el campo 2do.',
+            'secondValue.regex' => 'El código del modelo Zontes debe tener 5 letras o números válidos para un NIV, sin I, O ni Q.',
             'niv.max' => 'El NIV no puede superar los 50 caracteres.',
         ]);
 
         $productData = [
             'name' => $validated['description'],
+            'category' => $validated['category'],
+            'brand' => $validated['brand'],
             'first_value' => $validated['firstValue'] ?: null,
             'second_value' => $validated['secondValue'] ?: null,
             'niv' => $validated['niv'] ?: null,
@@ -278,6 +323,8 @@ new class extends Component
             'showForm',
             'editingProductId',
             'description',
+            'category',
+            'brand',
             'firstValue',
             'secondValue',
             'niv',
@@ -287,11 +334,24 @@ new class extends Component
         $this->resetValidation();
     }
 
+    private function synchronizeZontesNiv(): void
+    {
+        if ($this->brand !== 'zontes') {
+            return;
+        }
+
+        $this->firstValue = Str::upper(trim($this->firstValue));
+        $this->secondValue = Str::upper(trim($this->secondValue));
+        $this->niv = $this->firstValue.$this->secondValue;
+    }
+
     private function loadProduct(Product $product): void
     {
         $this->resetValidation();
         $this->editingProductId = $product->id;
         $this->description = $product->name;
+        $this->category = $product->category;
+        $this->brand = $product->brand ?? 'bera';
         $this->firstValue = $product->first_value ?? '';
         $this->secondValue = $product->second_value ?? '';
         $this->niv = $product->niv ?? '';
@@ -326,7 +386,7 @@ new class extends Component
                     Importar Excel
                 </label>
             @endif
-            <a href="{{ route('products.export', ['search' => trim($search)]) }}" class="inline-flex items-center justify-center gap-2 rounded-xl border-2 border-slate-950 bg-white px-5 py-3 font-bold text-slate-950 transition hover:bg-slate-950 hover:text-white dark:border-white dark:bg-slate-900 dark:text-white dark:hover:bg-white dark:hover:text-slate-950">Exportar data</a>
+            <a href="{{ route('products.export', ['search' => trim($search), 'category' => $categoryFilter]) }}" class="inline-flex items-center justify-center gap-2 rounded-xl border-2 border-slate-950 bg-white px-5 py-3 font-bold text-slate-950 transition hover:bg-slate-950 hover:text-white dark:border-white dark:bg-slate-900 dark:text-white dark:hover:bg-white dark:hover:text-slate-950">Exportar data</a>
             @if (auth()->user()->hasPermission(UserPermission::CreateProducts))
                 <a href="{{ route('products.create') }}" wire:navigate class="inline-flex items-center justify-center gap-2 rounded-xl bg-sky-600 px-5 py-3 font-semibold text-white shadow-lg shadow-sky-500/25 transition hover:bg-sky-500 focus:outline-none focus:ring-4 focus:ring-sky-500/30">
                 <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
@@ -379,6 +439,14 @@ new class extends Component
                 <span wire:loading wire:target="search" class="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-medium text-sky-600 dark:text-sky-300">Buscando...</span>
                 </div>
             </div>
+            <div class="w-full sm:w-auto sm:min-w-44">
+                <label for="product-category-filter" class="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">Categoría</label>
+                <select id="product-category-filter" wire:model.live="categoryFilter" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-950 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-500/10 dark:border-white/10 dark:bg-slate-950/60 dark:text-white">
+                    <option value="">Todas</option>
+                    <option value="nacional">Nacional</option>
+                    <option value="importados">Importados</option>
+                </select>
+            </div>
             <x-per-page-selector id="products-per-page" />
         </div>
 
@@ -386,16 +454,16 @@ new class extends Component
             <table class="w-full min-w-5xl text-left">
                 <thead class="bg-slate-50 text-xs uppercase tracking-wider text-slate-500 dark:bg-slate-950/40 dark:text-slate-400">
                     <tr>
+                        <th class="px-6 py-4 font-semibold">Marca</th>
                         <th class="px-6 py-4 font-semibold">Descripción</th>
-                        <th class="px-6 py-4 font-semibold">1ero</th>
-                        <th class="px-6 py-4 font-semibold">2do</th>
-                        <th class="px-6 py-4 font-semibold">NIV</th>
+                        <th class="px-6 py-4 font-semibold">Categoría</th>
                         <th class="px-6 py-4 text-right font-semibold">Acciones</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100 dark:divide-white/5">
                     @forelse ($this->products as $product)
                         <tr wire:key="product-{{ $product->id }}" x-on:click="window.location.href = '{{ route('products.edit', $product) }}'" class="cursor-pointer transition hover:bg-sky-50/60 dark:hover:bg-sky-500/5">
+                            <td class="px-6 py-4 text-sm">{{ ucfirst($product->brand) }}</td>
                             <td class="px-6 py-4">
                                 <div class="flex items-center gap-3">
                                     <span class="grid size-10 shrink-0 place-items-center rounded-xl bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300">
@@ -407,9 +475,7 @@ new class extends Component
                                     <span class="font-semibold">{{ $product->name }}</span>
                                 </div>
                             </td>
-                            <td class="px-6 py-4 text-sm">{{ $product->first_value ?: '—' }}</td>
-                            <td class="px-6 py-4 text-sm">{{ $product->second_value ?: '—' }}</td>
-                            <td class="px-6 py-4 text-sm font-medium">{{ $product->niv ?: '—' }}</td>
+                            <td class="px-6 py-4 text-sm">{{ $product->category === 'importados' ? 'Importados' : 'Nacional' }}</td>
                             <td class="px-6 py-4 text-right">
                                 <div class="inline-flex items-center justify-end gap-1">
                                     @if ($this->canDeleteProducts())
@@ -423,7 +489,7 @@ new class extends Component
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="5" class="px-6 py-14 text-center">
+                            <td colspan="4" class="px-6 py-14 text-center">
                                 <p class="font-semibold">No se encontraron productos</p>
                                 <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Crea un producto o prueba con otra búsqueda.</p>
                             </td>
@@ -501,17 +567,39 @@ new class extends Component
 
                     <div class="grid gap-5 sm:grid-cols-2">
                         <div class="sm:col-span-2">
+                            <label for="product-brand" class="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">Marca</label>
+                            <select id="product-brand" wire:model.live="brand" required @disabled($formReadOnly) class="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-950 outline-none transition disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 focus:border-sky-400 focus:ring-4 focus:ring-sky-500/10 dark:border-white/10 dark:bg-slate-950/60 dark:text-white dark:disabled:bg-slate-950/30">
+                                <option value="bera">Bera</option>
+                                <option value="zontes">Zontes</option>
+                                <option value="morini">Morini</option>
+                            </select>
+                            @error('brand') <p class="mt-2 text-sm text-rose-600 dark:text-rose-300">{{ $message }}</p> @enderror
+                        </div>
+                        <div class="sm:col-span-2">
                             <label for="product-description" class="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">Descripción</label>
                             <input id="product-description" wire:model="description" type="text" maxlength="255" required autofocus @disabled($formReadOnly) class="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-950 outline-none transition disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 focus:border-sky-400 focus:ring-4 focus:ring-sky-500/10 dark:border-white/10 dark:bg-slate-950/60 dark:text-white dark:disabled:bg-slate-950/30">
                             @error('description') <p class="mt-2 text-sm text-rose-600 dark:text-rose-300">{{ $message }}</p> @enderror
                         </div>
-                        @foreach ([['firstValue', '1ero'], ['secondValue', '2do'], ['niv', 'NIV']] as [$field, $label])
-                            <div>
-                                <label for="product-{{ $field }}" class="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">{{ $label }}</label>
-                                <input id="product-{{ $field }}" wire:model="{{ $field }}" type="text" maxlength="{{ $field === 'niv' ? 50 : 255 }}" @disabled($formReadOnly) class="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-950 outline-none transition disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 focus:border-sky-400 focus:ring-4 focus:ring-sky-500/10 dark:border-white/10 dark:bg-slate-950/60 dark:text-white dark:disabled:bg-slate-950/30">
-                                @error($field) <p class="mt-2 text-sm text-rose-600 dark:text-rose-300">{{ $message }}</p> @enderror
-                            </div>
-                        @endforeach
+                        <div class="sm:col-span-2">
+                            <label for="product-category" class="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">Categoría</label>
+                            <select id="product-category" wire:model="category" required @disabled($formReadOnly) class="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-950 outline-none transition disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 focus:border-sky-400 focus:ring-4 focus:ring-sky-500/10 dark:border-white/10 dark:bg-slate-950/60 dark:text-white dark:disabled:bg-slate-950/30">
+                                <option value="nacional">Nacional</option>
+                                <option value="importados">Importados</option>
+                            </select>
+                            @error('category') <p class="mt-2 text-sm text-rose-600 dark:text-rose-300">{{ $message }}</p> @enderror
+                        </div>
+                        @if (in_array($brand, ['bera', 'zontes'], true))
+                            @foreach ([['firstValue', '1ero'], ['secondValue', '2do'], ['niv', 'NIV']] as [$field, $label])
+                                <div wire:key="product-{{ $brand }}-{{ $field }}">
+                                    <label for="product-{{ $field }}" class="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">{{ $label }}</label>
+                                    <input id="product-{{ $field }}" @if ($brand === 'zontes') wire:model.live.debounce.300ms="{{ $field }}" @else wire:model="{{ $field }}" @endif type="text" maxlength="{{ $brand === 'zontes' ? match ($field) { 'firstValue' => 3, 'secondValue' => 5, default => 8 } : ($field === 'niv' ? 50 : 255) }}" @readonly($brand === 'zontes' && $field === 'niv') @disabled($formReadOnly) class="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-950 outline-none transition disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 focus:border-sky-400 focus:ring-4 focus:ring-sky-500/10 dark:border-white/10 dark:bg-slate-950/60 dark:text-white dark:disabled:bg-slate-950/30">
+                                    @if ($brand === 'zontes' && $field === 'niv')
+                                        <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">Prefijo de 8 caracteres generado al combinar 1ero y 2do para identificar el modelo.</p>
+                                    @endif
+                                    @error($field) <p class="mt-2 text-sm text-rose-600 dark:text-rose-300">{{ $message }}</p> @enderror
+                                </div>
+                            @endforeach
+                        @endif
                     </div>
 
                     @unless ($formOnly)
