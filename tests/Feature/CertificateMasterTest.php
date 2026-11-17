@@ -61,6 +61,68 @@ test('certificates can be searched in real time', function () {
         ->assertDontSee('CERT-OCULTO');
 });
 
+test('certificate categories combine with search and status and reset pagination', function (string $category) {
+    $this->actingAs(User::factory()->create(['permissions' => [UserPermission::ViewCertificates->value]]));
+    $selected = MsCertificado::factory()->create(['category' => $category, 'no' => 'BUSCADO-VISIBLE', 'status' => CertificateStatus::PendingDispatch]);
+    $opposite = MsCertificado::factory()->create(['category' => $category === 'nacional' ? 'importados' : 'nacional', 'no' => 'BUSCADO-OTRA-CATEGORIA', 'status' => CertificateStatus::PendingDispatch]);
+    $dispatched = MsCertificado::factory()->create(['category' => $category, 'no' => 'BUSCADO-DESPACHADO', 'status' => CertificateStatus::Dispatched]);
+
+    Livewire::test('certificate-master')
+        ->assertSee('certificate-category-filter', false)
+        ->assertSee('>Categoría</th>', false)
+        ->set('search', 'BUSCADO')
+        ->set('statusFilter', CertificateStatus::PendingDispatch->value)
+        ->call('setPage', 2)
+        ->set('categoryFilter', $category)
+        ->assertSet('paginators.page', 1)
+        ->assertSee($selected->no)
+        ->assertDontSee($opposite->no)
+        ->assertDontSee($dispatched->no)
+        ->set('categoryFilter', 'all')
+        ->assertSee($selected->no)
+        ->assertSee($opposite->no)
+        ->set('categoryFilter', 'invalida')
+        ->assertSet('categoryFilter', 'all');
+})->with(['nacional', 'importados']);
+
+test('certificate grouping respects category for records and counts', function () {
+    $this->actingAs(User::factory()->create(['permissions' => [UserPermission::ViewCertificates->value]]));
+    MsCertificado::factory()->count(2)->create(['category' => 'nacional', 'codigo' => 'GRUPO-A']);
+    MsCertificado::factory()->create(['category' => 'importados', 'codigo' => 'GRUPO-A']);
+    MsCertificado::factory()->create(['category' => 'importados', 'codigo' => 'GRUPO-B']);
+
+    $component = Livewire::test('certificate-master')
+        ->set('recordFilter', 'group_by_certificate')
+        ->set('categoryFilter', 'nacional')
+        ->assertSee('GRUPO-A')
+        ->assertDontSee('GRUPO-B');
+
+    expect($component->get('certificateGroupCounts'))->toBe(['GRUPO-A' => 2]);
+    expect($component->get('certificates')->first()->aggregate)->toBe(2);
+
+    $component->set('categoryFilter', 'importados')->assertSee('GRUPO-B');
+    expect($component->get('certificateGroupCounts'))->toBe(['GRUPO-A' => 1, 'GRUPO-B' => 1]);
+});
+
+test('certificate deletion keeps the category confirmed before filters change', function () {
+    $this->actingAs(User::factory()->create(['permissions' => [UserPermission::ViewCertificates->value, UserPermission::DeleteCertificates->value]]));
+    $national = MsCertificado::factory()->create(['category' => 'nacional']);
+    $imported = MsCertificado::factory()->create(['category' => 'importados']);
+
+    Livewire::test('certificate-master')
+        ->set('categoryFilter', 'importados')
+        ->call('openDeleteConfirmation')
+        ->assertSet('deleteCount', 1)
+        ->assertSet('deleteCategoryFilter', 'importados')
+        ->assertSee('de la categoría Importados.')
+        ->set('categoryFilter', 'nacional')
+        ->call('deleteRecords')
+        ->assertSet('showDeleteConfirmation', false);
+
+    $this->assertModelExists($national);
+    $this->assertModelMissing($imported);
+});
+
 test('users can change how many records are displayed per page', function () {
     $user = User::factory()->create([
         'permissions' => [UserPermission::ViewCertificates->value],

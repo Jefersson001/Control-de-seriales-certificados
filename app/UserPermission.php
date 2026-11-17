@@ -34,6 +34,10 @@ enum UserPermission: string
     case DeleteReturns = 'returns.delete';
     case ViewCertificateDocuments = 'certificate-documents.view';
     case DeleteCertificateDocuments = 'certificate-documents.delete';
+    case ViewNivComplianceCertificates = 'niv-compliance-certificates.view';
+    case CreateNivComplianceCertificates = 'niv-compliance-certificates.create';
+    case EditNivComplianceCertificates = 'niv-compliance-certificates.edit';
+    case DeleteNivComplianceCertificates = 'niv-compliance-certificates.delete';
 
     public function label(): string
     {
@@ -68,6 +72,10 @@ enum UserPermission: string
             self::DeleteReturns => 'Eliminar devoluciones',
             self::ViewCertificateDocuments => 'Consultar certificados PDF',
             self::DeleteCertificateDocuments => 'Eliminar certificados PDF',
+            self::ViewNivComplianceCertificates => 'Consultar constancias de cumplimiento NIV',
+            self::CreateNivComplianceCertificates => 'Cargar constancias de cumplimiento NIV',
+            self::EditNivComplianceCertificates => 'Editar constancias de cumplimiento NIV',
+            self::DeleteNivComplianceCertificates => 'Eliminar constancias de cumplimiento NIV',
         };
     }
 }

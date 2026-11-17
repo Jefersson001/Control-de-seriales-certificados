@@ -360,6 +360,11 @@ new class extends Component
             $validated['permissions'] = array_values(array_unique($validated['permissions']));
         }
 
+        if (array_intersect($validated['permissions'], [UserPermission::CreateNivComplianceCertificates->value, UserPermission::EditNivComplianceCertificates->value, UserPermission::DeleteNivComplianceCertificates->value]) !== []) {
+            $validated['permissions'][] = UserPermission::ViewNivComplianceCertificates->value;
+            $validated['permissions'] = array_values(array_unique($validated['permissions']));
+        }
+
         if ($this->editingUserId !== null) {
             $user = User::query()->findOrFail($this->editingUserId);
             $this->authorizeTargetUser($user);

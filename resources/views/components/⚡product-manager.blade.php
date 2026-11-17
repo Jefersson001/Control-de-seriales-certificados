@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\Product;
+use App\Models\NivComplianceCertificate;
 use App\Actions\Products\ImportProducts;
 use App\UserPermission;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -116,6 +117,16 @@ new class extends Component
     {
         $this->perPage = is_numeric($value) ? max(1, min((int) $value, 10000)) : 10;
         $this->resetPage();
+    }
+
+    #[Computed]
+    public function complianceCertificateCount(): int
+    {
+        if ($this->editingProductId === null || ! auth()->user()?->hasPermission(UserPermission::ViewNivComplianceCertificates)) {
+            return 0;
+        }
+
+        return NivComplianceCertificate::query()->where('product_id', $this->editingProductId)->count();
     }
 
     #[Computed]
@@ -588,6 +599,17 @@ new class extends Component
                             </select>
                             @error('category') <p class="mt-2 text-sm text-rose-600 dark:text-rose-300">{{ $message }}</p> @enderror
                         </div>
+                        @if ($editingProductId && auth()->user()->hasPermission(UserPermission::ViewNivComplianceCertificates))
+                            <div class="sm:col-span-2">
+                                <div class="flex flex-wrap items-end justify-between gap-4 rounded-2xl border border-sky-200 bg-sky-50/60 p-5 dark:border-sky-500/20 dark:bg-sky-500/5">
+                                    <div>
+                                        <label for="product-compliance-certificate-count" class="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">Cantidad de constancias</label>
+                                        <output id="product-compliance-certificate-count" class="block text-3xl font-semibold text-sky-700 dark:text-sky-300">{{ $this->complianceCertificateCount }}</output>
+                                    </div>
+                                    <a href="{{ route('niv_compliance_certificates.index', ['product' => $editingProductId]) }}" wire:navigate class="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-500">Ver constancias</a>
+                                </div>
+                            </div>
+                        @endif
                         @if (in_array($brand, ['bera', 'zontes'], true))
                             @foreach ([['firstValue', '1ero'], ['secondValue', '2do'], ['niv', 'NIV']] as [$field, $label])
                                 <div wire:key="product-{{ $brand }}-{{ $field }}">

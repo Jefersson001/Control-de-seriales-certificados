@@ -152,7 +152,7 @@ class ImportManagementCertificateAnalysis
                 foreach (array_chunk($rows, 500) as $chunk) {
                     $timestamp = now();
                     MsCertificado::query()->insert(array_map(
-                        fn (array $row): array => [...$row, 'created_at' => $timestamp, 'updated_at' => $timestamp],
+                        fn (array $row): array => [...$row, 'category' => $management->category, 'created_at' => $timestamp, 'updated_at' => $timestamp],
                         $chunk,
                     ));
                 }

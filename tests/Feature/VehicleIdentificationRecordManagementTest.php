@@ -25,11 +25,13 @@ use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
 
-test('finalizing a motorcycle serial request automatically creates one related management record', function () {
+test('finalizing a motorcycle serial request automatically creates one related management record', function (string $category) {
     $administrator = User::factory()->create(['role' => UserRole::Admin]);
     $serialRequest = MotorcycleSerialRequest::factory()->create([
         'status' => MotorcycleSerialRequestStatus::Draft,
+        'category' => $category,
     ]);
+    $serialRequest->lines()->first()->product->update(['category' => $category]);
 
     $this->actingAs($administrator);
 
@@ -44,6 +46,7 @@ test('finalizing a motorcycle serial request automatically creates one related m
         ->and($serialRequest->vehicleIdentificationRecordManagement->is($management))->toBeTrue()
         ->and($management->status)->toBe(VehicleIdentificationRecordManagementStatus::Draft)
         ->and($management->request_date)->toBeNull()
+        ->and($management->category)->toBe($category)
         ->and(VehicleIdentificationRecordManagement::query()
             ->where('motorcycle_serial_request_id', $serialRequest->id)
             ->count())->toBe(1);
@@ -52,6 +55,43 @@ test('finalizing a motorcycle serial request automatically creates one related m
         ->assertSet('managementRecordId', $management->id)
         ->assertSee('Gestión de constancia relacionada')
         ->assertSee(route('vehicle_identification_record_management.edit', $management));
+
+    $label = $category === 'importados' ? 'Importados' : 'Nacional';
+
+    $this->get(route('vehicle_identification_record_management.edit', $management))
+        ->assertSuccessful()
+        ->assertSee('Categoría')
+        ->assertSee($label)
+        ->assertSeeInOrder(['mt-6 grid gap-5 sm:grid-cols-2', '>Categoría</p>', 'for="management-request-date"'], false)
+        ->assertDontSee('wire:model="category"', false);
+
+    $this->get(route('vehicle_identification_record_management.index'))
+        ->assertSuccessful()
+        ->assertSee('Categoría')
+        ->assertSee($label);
+})->with(['nacional', 'importados']);
+
+test('existing management records inherit the category of their source request', function () {
+    $records = [];
+
+    foreach (['nacional', 'importados'] as $category) {
+        $request = MotorcycleSerialRequest::factory()->create(['category' => $category]);
+        $records[$category] = VehicleIdentificationRecordManagement::factory()
+            ->for($request, 'motorcycleSerialRequest')
+            ->create(['request_date' => '2026-11-01']);
+    }
+
+    $schemaMigration = require database_path('migrations/2026_11_17_171238_add_category_to_vehicle_identification_record_management_table.php');
+    $backfillMigration = require database_path('migrations/2026_11_17_171239_backfill_vehicle_identification_record_management_category.php');
+    $schemaMigration->down();
+    $schemaMigration->up();
+    $backfillMigration->up();
+
+    foreach ($records as $category => $record) {
+        expect($record->refresh())
+            ->category->toBe($category)
+            ->and($record->request_date->toDateString())->toBe('2026-11-01');
+    }
 });
 
 test('the management list shows generated records and has no manual creation action', function () {
@@ -100,6 +140,33 @@ test('management records can be searched by source request', function () {
         ->assertDontSee("#{$hiddenManagement->id}");
 });
 
+test('the management list filters category together with search and status', function (string $category) {
+    $owner = User::factory()->create(['name' => 'Usuario objetivo']);
+    $this->actingAs(User::factory()->create(['permissions' => [UserPermission::ViewVehicleIdentificationRecordManagement->value]]));
+    $request = MotorcycleSerialRequest::factory()->for($owner)->create();
+    $selected = VehicleIdentificationRecordManagement::factory()->for($request, 'motorcycleSerialRequest')->create(['category' => $category, 'status' => VehicleIdentificationRecordManagementStatus::Draft]);
+    $opposite = VehicleIdentificationRecordManagement::factory()->for(MotorcycleSerialRequest::factory()->for($owner), 'motorcycleSerialRequest')->create(['category' => $category === 'nacional' ? 'importados' : 'nacional', 'status' => VehicleIdentificationRecordManagementStatus::Draft]);
+    VehicleIdentificationRecordManagement::factory()->for(MotorcycleSerialRequest::factory()->for($owner), 'motorcycleSerialRequest')->create(['category' => $category, 'status' => VehicleIdentificationRecordManagementStatus::Done]);
+    VehicleIdentificationRecordManagement::factory()->create(['category' => $category, 'status' => VehicleIdentificationRecordManagementStatus::Draft]);
+
+    $component = Livewire::test('vehicle-identification-record-management-list')
+        ->assertSee('>Categoría</th>', false)
+        ->assertSee('management-category-filter', false)
+        ->set('search', 'Usuario objetivo')
+        ->set('statusFilter', VehicleIdentificationRecordManagementStatus::Draft->value)
+        ->call('setPage', 2)
+        ->set('categoryFilter', $category)
+        ->assertSet('paginators.page', 1)
+        ->assertSee('>'.($category === 'importados' ? 'Importados' : 'Nacional').'</a>', false);
+
+    expect($component->get('records')->pluck('id')->all())->toBe([$selected->id]);
+
+    $component->set('categoryFilter', 'all');
+    expect($component->get('records')->pluck('id')->sort()->values()->all())->toBe([$selected->id, $opposite->id]);
+
+    $component->set('categoryFilter', 'invalida')->assertSet('categoryFilter', 'all');
+})->with(['nacional', 'importados']);
+
 test('users with edit permission can update management status before importing', function () {
     $user = User::factory()->create([
         'permissions' => [
@@ -136,7 +203,7 @@ test('the request date is entered manually and persists independently of the cre
 
     Livewire::test('vehicle-identification-record-management-form', ['managementId' => $management->id])
         ->assertSee('Fecha de la solicitud de certificación')
-        ->assertSeeHtml('class="mt-6 w-full sm:w-1/2"')
+        ->assertSeeHtml('class="mt-6 grid gap-5 sm:grid-cols-2 sm:items-end"')
         ->assertSeeHtml('type="date"')
         ->assertSet('requestDate', null)
         ->set('requestDate', '2026-08-01')
@@ -602,10 +669,10 @@ test('certified serials can be imported partially until the complete request is 
         ->and(CertificateDocument::query()->count())->toBe(2);
 });
 
-test('certificate analysis exports and imports only selectable categories', function () {
+test('certificate analysis exports and imports only selectable categories', function (string $category) {
     Storage::fake('local');
     $administrator = User::factory()->create(['role' => UserRole::Admin]);
-    $management = VehicleIdentificationRecordManagement::factory()->create();
+    $management = VehicleIdentificationRecordManagement::factory()->create(['category' => $category]);
     $certificate = $management->certificates()->create([
         'control_number' => 'DG-NIV-RG5-0401-PC',
         'original_file_name' => 'certificado.pdf',
@@ -688,6 +755,7 @@ test('certificate analysis exports and imports only selectable categories', func
         ->assertSee('Importar seleccionados');
 
     expect(MsCertificado::query()->count())->toBe(4)
+        ->and(MsCertificado::query()->where('category', $category)->count())->toBe(4)
         ->and(MsCertificado::query()->where('niv', '8YZC7MCC0TD999999')->exists())->toBeFalse()
         ->and($management->refresh()->status)->toBe(VehicleIdentificationRecordManagementStatus::InProgress)
         ->and(CertificateDocument::query()->count())->toBe(1)
@@ -703,12 +771,20 @@ test('certificate analysis exports and imports only selectable categories', func
     expect($secondImport['imported'])->toBe(0)
         ->and(MsCertificado::query()->count())->toBe(4)
         ->and(CertificateDocument::query()->count())->toBe(1);
-});
 
-test('unexpected and missing serials can be exported and optionally imported', function () {
+    $schemaMigration = require database_path('migrations/2026_11_17_171950_add_category_to_ms_certificados_table.php');
+    $backfillMigration = require database_path('migrations/2026_11_17_171951_backfill_imported_ms_certificados_category.php');
+    $schemaMigration->down();
+    $schemaMigration->up();
+    $backfillMigration->up();
+
+    expect(MsCertificado::query()->where('category', $category)->count())->toBe(4);
+})->with(['nacional', 'importados']);
+
+test('unexpected and missing serials can be exported and optionally imported', function (string $category) {
     Storage::fake('local');
     $administrator = User::factory()->create(['role' => UserRole::Admin]);
-    $management = VehicleIdentificationRecordManagement::factory()->create();
+    $management = VehicleIdentificationRecordManagement::factory()->create(['category' => $category]);
     $missingNivs = $management->motorcycleSerialRequest->lines()
         ->with('serialEntries:id,motorcycle_serial_request_line_id,serial')
         ->get()
@@ -763,7 +839,19 @@ test('unexpected and missing serials can be exported and optionally imported', f
     foreach ($missingNivs as $missingNiv) {
         expect(MsCertificado::query()->where('niv', $missingNiv)->where('codigo', '')->exists())->toBeTrue();
     }
-});
+
+    expect(MsCertificado::query()->where('category', $category)->count())->toBe($result['imported']);
+
+    $unrelated = MsCertificado::factory()->create();
+    $schemaMigration = require database_path('migrations/2026_11_17_171950_add_category_to_ms_certificados_table.php');
+    $backfillMigration = require database_path('migrations/2026_11_17_171951_backfill_imported_ms_certificados_category.php');
+    $schemaMigration->down();
+    $schemaMigration->up();
+    $backfillMigration->up();
+
+    expect(MsCertificado::query()->whereKeyNot($unrelated->id)->where('category', $category)->count())->toBe($result['imported'])
+        ->and($unrelated->refresh()->category)->toBe('nacional');
+})->with(['nacional', 'importados']);
 
 test('legacy certificate source data is recovered from its stored pdf', function () {
     Storage::fake('local');

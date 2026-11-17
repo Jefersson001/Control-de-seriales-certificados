@@ -20,6 +20,9 @@ new class extends Component
     #[Url(as: 'status', except: 'all')]
     public string $statusFilter = 'all';
 
+    #[Url(as: 'category', except: 'all')]
+    public string $categoryFilter = 'all';
+
     public $perPage = 10;
 
     public bool $showDeleteConfirmation = false;
@@ -38,6 +41,10 @@ new class extends Component
 
         if (MotorcycleSerialRequestStatus::tryFrom($this->statusFilter) === null) {
             $this->statusFilter = 'all';
+        }
+
+        if (! in_array($this->categoryFilter, ['all', 'nacional', 'importados'], true)) {
+            $this->categoryFilter = 'all';
         }
     }
 
@@ -59,6 +66,16 @@ new class extends Component
     {
         $this->perPage = is_numeric($value) ? max(1, min((int) $value, 10000)) : 10;
         $this->resetPage();
+    }
+
+    public function updatedCategoryFilter(): void
+    {
+        if (! in_array($this->categoryFilter, ['all', 'nacional', 'importados'], true)) {
+            $this->categoryFilter = 'all';
+        }
+
+        $this->resetPage();
+        unset($this->requests);
     }
 
     public function canDeleteRequests(): bool
@@ -111,6 +128,7 @@ new class extends Component
 
         return MotorcycleSerialRequest::query()
             ->with(['lines.product:id,name', 'user:id,name'])
+            ->when(in_array($this->categoryFilter, ['nacional', 'importados'], true), fn (Builder $query) => $query->where('category', $this->categoryFilter))
             ->when(
                 MotorcycleSerialRequestStatus::tryFrom($this->statusFilter) !== null,
                 fn (Builder $query): Builder => $query->where('status', $this->statusFilter),
@@ -185,6 +203,14 @@ new class extends Component
                     @endforeach
                 </select>
             </div>
+            <div class="w-full sm:max-w-44">
+                <label for="request-category-filter" class="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Categoría</label>
+                <select id="request-category-filter" wire:model.live="categoryFilter" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-950 outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-500/10 dark:border-white/10 dark:bg-slate-950/60 dark:text-white">
+                    <option value="all">Todos</option>
+                    <option value="nacional">Nacional</option>
+                    <option value="importados">Importados</option>
+                </select>
+            </div>
             <x-per-page-selector id="requests-per-page" />
         </div>
 
@@ -193,6 +219,7 @@ new class extends Component
                 <thead class="bg-slate-50 text-xs uppercase tracking-wider text-slate-500 dark:bg-slate-950/40 dark:text-slate-400">
                     <tr>
                         <th class="px-6 py-4 font-semibold">Solicitud</th>
+                        <th class="px-6 py-4 font-semibold">Categoría</th>
                         <th class="px-6 py-4 font-semibold">Productos</th>
                         <th class="px-6 py-4 font-semibold">Creado por</th>
                         <th class="px-6 py-4 font-semibold">Cantidad</th>
@@ -209,6 +236,7 @@ new class extends Component
                             <td class="p-0">
                                 <a href="{{ route('motorcycle_serial_requests.edit', $serialRequest) }}" class="block px-6 py-4 font-semibold text-violet-700 dark:text-violet-300">#{{ $serialRequest->id }}</a>
                             </td>
+                            <td class="p-0"><a href="{{ route('motorcycle_serial_requests.edit', $serialRequest) }}" class="block px-6 py-4 text-sm">{{ $serialRequest->category === 'importados' ? 'Importados' : 'Nacional' }}</a></td>
                             <td class="p-0">
                                 <a href="{{ route('motorcycle_serial_requests.edit', $serialRequest) }}" class="block px-6 py-4 font-medium">{{ $serialRequest->lines->pluck('product.name')->join(', ') }}</a>
                             </td>
@@ -241,7 +269,7 @@ new class extends Component
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="{{ $this->canDeleteRequests() ? 7 : 6 }}" class="px-6 py-14 text-center">
+                            <td colspan="{{ $this->canDeleteRequests() ? 8 : 7 }}" class="px-6 py-14 text-center">
                                 <p class="font-semibold">No se encontraron solicitudes</p>
                                 <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Crea una solicitud o prueba con otra búsqueda.</p>
                             </td>

@@ -78,6 +78,32 @@ test('requests can be filtered by status', function () {
         ->assertDontSee('02/08/2026');
 });
 
+test('the request list filters by category together with search and status', function (string $category) {
+    $owner = User::factory()->create(['name' => 'Usuario objetivo']);
+    $this->actingAs(User::factory()->create(['permissions' => [UserPermission::ViewMotorcycleSerialRequests->value]]));
+    $selected = MotorcycleSerialRequest::factory()->for($owner)->create(['category' => $category, 'status' => MotorcycleSerialRequestStatus::InProgress]);
+    $opposite = MotorcycleSerialRequest::factory()->for($owner)->create(['category' => $category === 'nacional' ? 'importados' : 'nacional', 'status' => MotorcycleSerialRequestStatus::InProgress]);
+    MotorcycleSerialRequest::factory()->for($owner)->create(['category' => $category, 'status' => MotorcycleSerialRequestStatus::Done]);
+    MotorcycleSerialRequest::factory()->create(['category' => $category, 'status' => MotorcycleSerialRequestStatus::InProgress]);
+
+    $component = Livewire::test('motorcycle-serial-request-list')
+        ->assertSee('>Categoría</th>', false)
+        ->assertSee('request-category-filter', false)
+        ->set('search', 'Usuario objetivo')
+        ->set('statusFilter', MotorcycleSerialRequestStatus::InProgress->value)
+        ->call('setPage', 2)
+        ->set('categoryFilter', $category)
+        ->assertSet('paginators.page', 1)
+        ->assertSee('>'.($category === 'importados' ? 'Importados' : 'Nacional').'</a>', false);
+
+    expect($component->get('requests')->pluck('id')->all())->toBe([$selected->id]);
+
+    $component->set('categoryFilter', 'all');
+    expect($component->get('requests')->pluck('id')->sort()->values()->all())->toBe([$selected->id, $opposite->id]);
+
+    $component->set('categoryFilter', 'invalida')->assertSet('categoryFilter', 'all');
+})->with(['nacional', 'importados']);
+
 test('saving a new request moves it from draft to in progress', function () {
     $user = User::factory()->create([
         'permissions' => [

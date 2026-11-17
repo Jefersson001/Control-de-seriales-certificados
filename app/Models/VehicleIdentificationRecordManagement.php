@@ -11,7 +11,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['motorcycle_serial_request_id', 'status', 'request_date'])]
+/** @property string $category */
+#[Fillable(['motorcycle_serial_request_id', 'status', 'request_date', 'category'])]
 class VehicleIdentificationRecordManagement extends Model
 {
     /** @use HasFactory<VehicleIdentificationRecordManagementFactory> */
@@ -28,6 +29,7 @@ class VehicleIdentificationRecordManagement extends Model
 
     protected $attributes = [
         'status' => VehicleIdentificationRecordManagementStatus::Draft->value,
+        'category' => 'nacional',
     ];
 
     /** @return BelongsTo<MotorcycleSerialRequest, $this> */

@@ -620,6 +620,7 @@ new class extends Component
             if ($finalizing) {
                 $serialRequest->vehicleIdentificationRecordManagement()->firstOrCreate([], [
                     'status' => VehicleIdentificationRecordManagementStatus::Draft,
+                    'category' => $serialRequest->category,
                 ]);
             }
 

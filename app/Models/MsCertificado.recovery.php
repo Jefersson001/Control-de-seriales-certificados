@@ -21,12 +21,13 @@ use Illuminate\Support\Carbon;
  * @property string $fabricacion
  * @property int $anio
  * @property string $niv
+ * @property string $category
  * @property CertificateStatus $status
  * @property string $codigo
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
-#[Fillable(['no', 'marca', 'modelo', 'tipo', 'fabricacion', 'anio', 'niv', 'status', 'codigo', 'issued_on'])]
+#[Fillable(['no', 'marca', 'modelo', 'tipo', 'fabricacion', 'anio', 'niv', 'category', 'status', 'codigo', 'issued_on'])]
 class MsCertificado extends Model
 {
     /** @use HasFactory<MsCertificadoFactory> */
@@ -35,12 +36,21 @@ class MsCertificado extends Model
     /** @var array<string, mixed> */
     protected $attributes = [
         'status' => CertificateStatus::PendingDispatch->value,
+        'category' => 'nacional',
     ];
 
     /** @return HasMany<CertificateDocument, $this> */
     public function certificateDocuments(): HasMany
     {
         return $this->hasMany(CertificateDocument::class, 'control_number', 'codigo');
+    }
+
+    /** @param Builder<MsCertificado> $query
+     * @return Builder<MsCertificado>
+     */
+    public function scopeFilterByCategory(Builder $query, ?string $category): Builder
+    {
+        return $query->when(in_array($category, ['nacional', 'importados'], true), fn (Builder $query) => $query->where('category', $category));
     }
 
     /**

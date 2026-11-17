@@ -61,21 +61,31 @@ test('authenticated users can export certificates to xlsx', function () {
     expect($response->headers->get('content-disposition'))->toContain('.xlsx');
 });
 
-test('the export only includes certificates matching the current search', function () {
+test('the export only includes certificates matching the current search and category', function (string $category) {
     $user = User::factory()->create([
         'permissions' => [UserPermission::ViewCertificates->value],
     ]);
     MsCertificado::factory()->create([
         'no' => 'CERT-ENCONTRADO',
         'niv' => 'NIV-BUSCADO-123',
+        'category' => $category === 'all' ? 'nacional' : $category,
     ]);
     MsCertificado::factory()->create([
         'no' => 'CERT-OCULTO',
         'niv' => 'NIV-DIFERENTE-456',
     ]);
 
+    if ($category !== 'all') {
+        MsCertificado::factory()->create([
+            'no' => 'CERT-OTRA-CATEGORIA',
+            'niv' => 'NIV-BUSCADO-123',
+            'category' => $category === 'nacional' ? 'importados' : 'nacional',
+        ]);
+    }
+
     $response = $this->actingAs($user)->get(route('certificates.export', [
         'search' => 'NIV-BUSCADO-123',
+        'category' => $category,
     ]));
 
     $response->assertSuccessful();
@@ -97,7 +107,7 @@ test('the export only includes certificates matching the current search', functi
     expect($exportedRows)->toHaveCount(2)
         ->and($exportedRows[1][0])->toBe('CERT-ENCONTRADO')
         ->and($exportedRows[1][6])->toBe('NIV-BUSCADO-123');
-});
+})->with(['all', 'nacional', 'importados']);
 
 test('guests cannot export certificates', function () {
     $this->get(route('certificates.export'))

@@ -19,6 +19,9 @@ new class extends Component
     #[Url(as: 'status', except: 'all')]
     public string $statusFilter = 'all';
 
+    #[Url(as: 'category', except: 'all')]
+    public string $categoryFilter = 'all';
+
     public $perPage = 10;
 
     public function mount(): void
@@ -27,6 +30,10 @@ new class extends Component
 
         if (VehicleIdentificationRecordManagementStatus::tryFrom($this->statusFilter) === null) {
             $this->statusFilter = 'all';
+        }
+
+        if (! in_array($this->categoryFilter, ['all', 'nacional', 'importados'], true)) {
+            $this->categoryFilter = 'all';
         }
     }
 
@@ -51,12 +58,23 @@ new class extends Component
         $this->resetPage();
     }
 
+    public function updatedCategoryFilter(): void
+    {
+        if (! in_array($this->categoryFilter, ['all', 'nacional', 'importados'], true)) {
+            $this->categoryFilter = 'all';
+        }
+
+        $this->resetPage();
+        unset($this->records);
+    }
+
     #[Computed]
     public function records(): LengthAwarePaginator
     {
         $search = trim($this->search);
 
         return VehicleIdentificationRecordManagement::query()
+            ->when(in_array($this->categoryFilter, ['nacional', 'importados'], true), fn (Builder $query) => $query->where('category', $this->categoryFilter))
             ->when(
                 VehicleIdentificationRecordManagementStatus::tryFrom($this->statusFilter) !== null,
                 fn (Builder $query): Builder => $query->where('status', $this->statusFilter),
@@ -110,6 +128,14 @@ new class extends Component
                     @endforeach
                 </select>
             </div>
+            <div class="w-full sm:max-w-44">
+                <label for="management-category-filter" class="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Categoría</label>
+                <select id="management-category-filter" wire:model.live="categoryFilter" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-950 outline-none transition focus:border-emerald-400 focus:ring-4 focus:ring-emerald-500/10 dark:border-white/10 dark:bg-slate-950/60 dark:text-white">
+                    <option value="all">Todos</option>
+                    <option value="nacional">Nacional</option>
+                    <option value="importados">Importados</option>
+                </select>
+            </div>
             <x-per-page-selector id="management-records-per-page" />
         </div>
 
@@ -119,6 +145,7 @@ new class extends Component
                     <tr>
                         <th class="px-6 py-4 font-semibold">Gestión</th>
                         <th class="px-6 py-4 font-semibold">Solicitud</th>
+                        <th class="px-6 py-4 font-semibold">Categoría</th>
                         <th class="px-6 py-4 font-semibold">Cantidad</th>
                         <th class="px-6 py-4 font-semibold">Creado por</th>
                         <th class="px-6 py-4 font-semibold">Fecha de creación</th>
@@ -131,6 +158,7 @@ new class extends Component
                         <tr wire:key="record-management-{{ $record->id }}" class="transition hover:bg-emerald-50/60 dark:hover:bg-emerald-500/5">
                             <td class="p-0"><a href="{{ route('vehicle_identification_record_management.edit', $record) }}" class="block px-6 py-4 font-semibold text-emerald-700 dark:text-emerald-300">#{{ $record->id }}</a></td>
                             <td class="p-0"><a href="{{ route('vehicle_identification_record_management.edit', $record) }}" class="block px-6 py-4 font-semibold">#{{ $record->motorcycle_serial_request_id }}</a></td>
+                            <td class="p-0"><a href="{{ route('vehicle_identification_record_management.edit', $record) }}" class="block px-6 py-4 text-sm">{{ $record->category === 'importados' ? 'Importados' : 'Nacional' }}</a></td>
                             <td class="p-0"><a href="{{ route('vehicle_identification_record_management.edit', $record) }}" class="block px-6 py-4 font-semibold">{{ $record->motorcycleSerialRequest->lines->sum('quantity') }}</a></td>
                             <td class="p-0"><a href="{{ route('vehicle_identification_record_management.edit', $record) }}" class="block px-6 py-4 text-sm">{{ $record->motorcycleSerialRequest->user?->name ?? 'Usuario no disponible' }}</a></td>
                             <td class="p-0"><a href="{{ route('vehicle_identification_record_management.edit', $record) }}" class="block px-6 py-4 text-sm text-slate-500 dark:text-slate-400">{{ $record->created_at?->format('d/m/Y H:i') }}</a></td>
@@ -147,7 +175,7 @@ new class extends Component
                             </td>
                         </tr>
                     @empty
-                        <tr><td colspan="7" class="px-6 py-14 text-center"><p class="font-semibold">No se encontraron gestiones</p><p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Finaliza una solicitud de seriales para generar el primer registro.</p></td></tr>
+                        <tr><td colspan="8" class="px-6 py-14 text-center"><p class="font-semibold">No se encontraron gestiones</p><p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Finaliza una solicitud de seriales para generar el primer registro.</p></td></tr>
                     @endforelse
                 </tbody>
             </table>

@@ -36,6 +36,7 @@ class CertificateExportController extends Controller
 
         foreach (
             MsCertificado::query()
+                ->filterByCategory($request->validated('category'))
                 ->search($search)
                 ->tap(fn ($query) => app(ApplyCertificateDateFilter::class)->handle($query, (string) $request->validated('dateField', ''), (string) $request->validated('dateFrom', ''), (string) $request->validated('dateTo', '')))
                 ->oldest('id')

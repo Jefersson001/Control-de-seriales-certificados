@@ -4,8 +4,22 @@ use App\Models\User;
 use App\UserPermission;
 use App\UserRole;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
+
+test('request list category filters can be restored from the url', function (string $component, string $filter, string $expected) {
+    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+
+    Livewire::withQueryParams(['category' => $filter])
+        ->test($component)
+        ->assertSet('categoryFilter', $expected);
+})->with(['motorcycle-serial-request-list', 'vehicle-identification-record-management-list'])
+    ->with([
+        ['nacional', 'nacional'],
+        ['importados', 'importados'],
+        ['invalida', 'all'],
+    ]);
 
 test('administrators can access the new modules', function (string $routeName, string $heading) {
     $administrator = User::factory()->create([

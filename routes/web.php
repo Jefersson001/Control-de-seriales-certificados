@@ -9,12 +9,21 @@ use App\Http\Controllers\DispatchCertificatePrintController;
 use App\Http\Controllers\DispatchController;
 use App\Http\Controllers\DispatchUncertifiedSerialPrintController;
 use App\Http\Controllers\MotorcycleSerialRequestController;
+use App\Http\Controllers\NivComplianceCertificateController;
+use App\Http\Controllers\NivComplianceCertificateDownloadController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\ProductExportController;
 use App\Http\Controllers\ReturnController;
 use App\Http\Controllers\UserManagementController;
 use App\Http\Controllers\VehicleIdentificationRecordManagementController;
 use Illuminate\Support\Facades\Route;
+
+Route::prefix('constancias-cumplimiento-niv')->name('niv_compliance_certificates.')->middleware(['auth', 'password.not_expired'])->group(function (): void {
+    Route::get('/', [NivComplianceCertificateController::class, 'index'])->middleware('permission:niv-compliance-certificates.view')->name('index');
+    Route::get('/nueva', [NivComplianceCertificateController::class, 'create'])->middleware('permission:niv-compliance-certificates.create')->name('create');
+    Route::get('/{certificate}', [NivComplianceCertificateController::class, 'edit'])->middleware('permission:niv-compliance-certificates.view')->name('edit');
+    Route::get('/{certificate}/descargar', NivComplianceCertificateDownloadController::class)->middleware('permission:niv-compliance-certificates.view')->name('download');
+});
 
 Route::view('/', 'index')->name('home');
 Route::view('/login', 'login')->middleware('guest')->name('login');

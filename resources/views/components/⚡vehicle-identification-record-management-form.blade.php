@@ -474,10 +474,16 @@ new class extends Component
                 </div>
             </div>
 
-            <div class="mt-6 w-full sm:w-1/2">
-                <label for="management-request-date" class="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-300">Fecha de la solicitud de certificación</label>
-                <input id="management-request-date" wire:model="requestDate" type="date" @disabled(! $this->canEditRequestDate()) class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-950 outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-500/10 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-slate-950/60 dark:text-white">
-                @error('requestDate') <p class="mt-2 text-sm text-red-600 dark:text-red-400">{{ $message }}</p> @enderror
+            <div class="mt-6 grid gap-5 sm:grid-cols-2 sm:items-end">
+                <div>
+                    <p class="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-300">Categoría</p>
+                    <p class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 font-semibold dark:border-white/10 dark:bg-slate-950/60">{{ $this->management->category === 'importados' ? 'Importados' : 'Nacional' }}</p>
+                </div>
+                <div>
+                    <label for="management-request-date" class="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-300">Fecha de la solicitud de certificación</label>
+                    <input id="management-request-date" wire:model="requestDate" type="date" @disabled(! $this->canEditRequestDate()) class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-950 outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-500/10 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-slate-950/60 dark:text-white">
+                    @error('requestDate') <p class="mt-2 text-sm text-red-600 dark:text-red-400">{{ $message }}</p> @enderror
+                </div>
             </div>
 
             <section x-data="{ processing: false, total: 0, completed: 0, progress: 0, progressTimer: null, startProgress() { this.stopProgress(); this.progressTimer = setInterval(() => { const limit = ((this.completed + 0.99) / this.total) * 100; if (this.progress < limit) { this.progress = Math.min(limit, this.progress + Math.max(0.2, (limit - this.progress) * 0.025)); } }, 400); }, stopProgress() { if (this.progressTimer !== null) { clearInterval(this.progressTimer); this.progressTimer = null; } }, async processCertificates() { this.processing = true; this.total = $wire.pdfFiles.length; this.completed = 0; this.progress = 0; try { let hasMore = true; while (hasMore) { this.startProgress(); hasMore = await $wire.processNextPdf(); this.stopProgress(); this.completed++; this.progress = Math.round((this.completed / this.total) * 100); } await new Promise(resolve => setTimeout(resolve, 700)); } finally { this.stopProgress(); this.processing = false; } } }" class="mt-8 overflow-hidden rounded-3xl border border-sky-200 bg-sky-50/60 dark:border-sky-500/20 dark:bg-sky-500/5">

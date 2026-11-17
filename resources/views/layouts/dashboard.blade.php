@@ -216,17 +216,18 @@
                     @if (
                         auth()->user()->hasPermission(App\UserPermission::ViewMotorcycleSerialRequests)
                         || auth()->user()->hasPermission(App\UserPermission::ViewVehicleIdentificationRecordManagement)
+                        || auth()->user()->hasPermission(App\UserPermission::ViewNivComplianceCertificates)
                     )
                         <details
                             data-requests-menu
                             class="group order-[998]"
-                            @if (request()->routeIs('motorcycle_serial_requests.*', 'vehicle_identification_record_management.*')) open @endif
+                            @if (request()->routeIs('motorcycle_serial_requests.*', 'vehicle_identification_record_management.*', 'niv_compliance_certificates.*')) open @endif
                         >
                             <summary
                                 @class([
                                     'flex cursor-pointer list-none items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition [&::-webkit-details-marker]:hidden',
-                                    'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300' => request()->routeIs('motorcycle_serial_requests.*', 'vehicle_identification_record_management.*'),
-                                    'text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-white' => ! request()->routeIs('motorcycle_serial_requests.*', 'vehicle_identification_record_management.*'),
+                                    'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300' => request()->routeIs('motorcycle_serial_requests.*', 'vehicle_identification_record_management.*', 'niv_compliance_certificates.*'),
+                                    'text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-white' => ! request()->routeIs('motorcycle_serial_requests.*', 'vehicle_identification_record_management.*', 'niv_compliance_certificates.*'),
                                 ])
                             >
                                 <svg class="size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
@@ -272,6 +273,16 @@
                                             <circle cx="12" cy="12.75" r="3"/>
                                         </svg>
                                         <span class="leading-5">Gestión de Constancia de Registro de Número de Identificación de Vehículo</span>
+                                    </a>
+                                @endif
+                                @if (auth()->user()->hasPermission(App\UserPermission::ViewNivComplianceCertificates))
+                                    <a href="{{ route('niv_compliance_certificates.index') }}" @class([
+                                        'flex items-start gap-3 rounded-xl px-4 py-2.5 text-sm font-medium transition',
+                                        'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300' => request()->routeIs('niv_compliance_certificates.*'),
+                                        'text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/5' => ! request()->routeIs('niv_compliance_certificates.*'),
+                                    ])>
+                                        <svg class="mt-0.5 size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6M6 3h9l3 3v15H6V3Z"/></svg>
+                                        <span class="leading-5">Constancias de cumplimiento NIV</span>
                                     </a>
                                 @endif
                             </div>

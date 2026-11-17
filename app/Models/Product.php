@@ -46,4 +46,10 @@ class Product extends Model
     {
         return $this->hasMany(MotorcycleSerialRequestLine::class);
     }
+
+    /** @return HasMany<NivComplianceCertificate, $this> */
+    public function nivComplianceCertificates(): HasMany
+    {
+        return $this->hasMany(NivComplianceCertificate::class);
+    }
 }

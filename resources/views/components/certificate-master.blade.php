@@ -62,6 +62,9 @@ new class extends Component
     #[Url(as: 'status', except: 'all')]
     public string $statusFilter = 'all';
 
+    #[Url(as: 'category', except: 'all')]
+    public string $categoryFilter = 'all';
+
     public bool $showDeleteConfirmation = false;
 
     #[Locked]
@@ -72,6 +75,9 @@ new class extends Component
 
     #[Locked]
     public string $deleteStatusFilter = 'all';
+
+    #[Locked]
+    public string $deleteCategoryFilter = 'all';
 
     #[Locked]
     public int $deleteCount = 0;
@@ -90,6 +96,10 @@ new class extends Component
 
         if (CertificateStatus::tryFrom($this->statusFilter) === null) {
             $this->statusFilter = 'all';
+        }
+
+        if (! in_array($this->categoryFilter, ['all', 'nacional', 'importados'], true)) {
+            $this->categoryFilter = 'all';
         }
     }
 
@@ -117,6 +127,15 @@ new class extends Component
         $this->statusFilter = CertificateStatus::tryFrom($this->statusFilter) !== null
             ? $this->statusFilter
             : 'all';
+        $this->resetPage();
+    }
+
+    public function updatedCategoryFilter(): void
+    {
+        if (! in_array($this->categoryFilter, ['all', 'nacional', 'importados'], true)) {
+            $this->categoryFilter = 'all';
+        }
+
         $this->resetPage();
     }
 
@@ -164,10 +183,12 @@ new class extends Component
         $this->deleteSearch = trim($this->search);
         $this->deleteRecordFilter = $this->recordFilter;
         $this->deleteStatusFilter = $this->statusFilter;
+        $this->deleteCategoryFilter = $this->categoryFilter;
         $this->deleteCount = MsCertificado::query()
             ->search($this->deleteSearch)
             ->filterByNivStatus($this->deleteRecordFilter)
             ->filterByCertificateStatus($this->deleteStatusFilter)
+            ->filterByCategory($this->deleteCategoryFilter)
             ->tap(fn ($query) => app(ApplyCertificateDateFilter::class)->handle($query, ...$this->deleteDateFilters))
             ->count();
         $this->showDeleteConfirmation = true;
@@ -175,7 +196,7 @@ new class extends Component
 
     public function closeDeleteConfirmation(): void
     {
-        $this->reset(['showDeleteConfirmation', 'deleteSearch', 'deleteRecordFilter', 'deleteStatusFilter', 'deleteCount', 'deleteDateFilters']);
+        $this->reset(['showDeleteConfirmation', 'deleteSearch', 'deleteRecordFilter', 'deleteStatusFilter', 'deleteCategoryFilter', 'deleteCount', 'deleteDateFilters']);
     }
 
     public function deleteRecords(): void
@@ -186,6 +207,7 @@ new class extends Component
             ->search($this->deleteSearch)
             ->filterByNivStatus($this->deleteRecordFilter)
             ->filterByCertificateStatus($this->deleteStatusFilter)
+            ->filterByCategory($this->deleteCategoryFilter)
             ->tap(fn ($query) => app(ApplyCertificateDateFilter::class)->handle($query, ...$this->deleteDateFilters))
             ->delete();
 
@@ -211,6 +233,7 @@ new class extends Component
                 'anio',
                 'niv',
                 'status',
+                'category',
                 'codigo',
                 'created_at',
                 'issued_on',
@@ -218,6 +241,7 @@ new class extends Component
             ->search($this->search)
             ->filterByNivStatus($this->recordFilter)
             ->filterByCertificateStatus($this->statusFilter)
+            ->filterByCategory($this->categoryFilter)
             ->tap(fn ($query) => app(ApplyCertificateDateFilter::class)->handle($query, $this->dateField, $this->dateFrom, $this->dateTo));
 
         if ($this->recordFilter === 'group_by_certificate') {
@@ -243,6 +267,7 @@ new class extends Component
         return MsCertificado::query()
             ->search($this->search)
             ->filterByCertificateStatus($this->statusFilter)
+            ->filterByCategory($this->categoryFilter)
             ->tap(fn ($query) => app(ApplyCertificateDateFilter::class)->handle($query, $this->dateField, $this->dateFrom, $this->dateTo))
             ->selectRaw('codigo, COUNT(*) as aggregate')
             ->groupBy('codigo')
@@ -270,7 +295,7 @@ new class extends Component
                 Importar Excel
             </label>
         @endif
-        <a href="{{ route('certificates.export', ['search' => trim($search), 'dateField' => $dateField, 'dateFrom' => $dateFrom, 'dateTo' => $dateTo]) }}" class="inline-flex items-center justify-center gap-2 rounded-xl border-2 border-slate-950 bg-white px-4 py-3 text-sm font-bold text-slate-950 shadow-sm transition hover:bg-slate-950 hover:text-white dark:border-white dark:bg-slate-900 dark:text-white dark:hover:bg-white dark:hover:text-slate-950">
+        <a href="{{ route('certificates.export', ['search' => trim($search), 'category' => $categoryFilter, 'dateField' => $dateField, 'dateFrom' => $dateFrom, 'dateTo' => $dateTo]) }}" class="inline-flex items-center justify-center gap-2 rounded-xl border-2 border-slate-950 bg-white px-4 py-3 text-sm font-bold text-slate-950 shadow-sm transition hover:bg-slate-950 hover:text-white dark:border-white dark:bg-slate-900 dark:text-white dark:hover:bg-white dark:hover:text-slate-950">
             <svg class="size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v12m0 0 4-4m-4 4-4-4M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3"/>
             </svg>
@@ -353,7 +378,7 @@ new class extends Component
     @enderror
 
     <div class="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
-        <div class="flex flex-col gap-4 border-b border-slate-200 p-5 dark:border-white/10 lg:flex-row lg:items-end">
+        <div class="flex flex-col gap-4 border-b border-slate-200 p-5 dark:border-white/10 lg:flex-row lg:flex-wrap lg:items-end">
             <label for="certificate-search" class="sr-only">Buscar certificados</label>
             <div class="relative w-full max-w-2xl">
                 <svg class="pointer-events-none absolute left-4 top-1/2 size-5 -translate-y-1/2 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
@@ -402,6 +427,14 @@ new class extends Component
                     @foreach (CertificateStatus::cases() as $status)
                         <option value="{{ $status->value }}">{{ $status->label() }}</option>
                     @endforeach
+                </select>
+            </div>
+            <div class="w-full lg:max-w-44">
+                <label for="certificate-category-filter" class="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Categoría</label>
+                <select id="certificate-category-filter" wire:model.live="categoryFilter" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-950 outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 dark:border-white/10 dark:bg-slate-950/60 dark:text-white">
+                    <option value="all">Todos</option>
+                    <option value="nacional">Nacional</option>
+                    <option value="importados">Importados</option>
                 </select>
             </div>
             <x-per-page-selector id="certificates-per-page" />
@@ -472,6 +505,7 @@ new class extends Component
                         <th class="px-5 py-4 font-semibold">Año</th>
                         <th class="px-5 py-4 font-semibold">NIV</th>
                         <th class="px-5 py-4 font-semibold">Status</th>
+                        <th class="px-5 py-4 font-semibold">Categoría</th>
                         <th class="px-5 py-4 font-semibold">Certificado</th>
                         <th class="px-5 py-4 font-semibold">Fecha de creación</th>
                         <th class="px-5 py-4 font-semibold">Fecha de certificación</th>
@@ -484,7 +518,7 @@ new class extends Component
                         @if ($recordFilter === 'group_by_certificate' && $currentCertificateGroup !== $certificate->codigo)
                             @php($currentCertificateGroup = $certificate->codigo)
                             <tr wire:key="certificate-group-{{ $certificate->id }}" class="bg-indigo-50 dark:bg-indigo-500/10">
-                                <td colspan="12" class="p-0">
+                                <td colspan="13" class="p-0">
                                     <button
                                         type="button"
                                         class="flex w-full items-center gap-2 px-5 py-3 text-left font-semibold text-indigo-800 transition hover:bg-indigo-100 dark:text-indigo-200 dark:hover:bg-indigo-500/15"
@@ -532,6 +566,7 @@ new class extends Component
                                     'bg-rose-100 text-rose-800 dark:bg-rose-500/15 dark:text-rose-300' => $certificate->status === CertificateStatus::Returned,
                                 ])>{{ $certificate->status->label() }}</span>
                             </td>
+                            <td class="whitespace-nowrap px-5 py-4">{{ $certificate->category === 'importados' ? 'Importados' : 'Nacional' }}</td>
                             <td class="whitespace-nowrap px-5 py-4 font-mono text-sm text-slate-600 dark:text-slate-300">{{ $certificate->codigo }}</td>
                             <td class="whitespace-nowrap px-5 py-4 text-sm text-slate-600 dark:text-slate-300">{{ $certificate->created_at?->format('d/m/Y H:i') }}</td>
                             <td class="whitespace-nowrap px-5 py-4 text-sm text-slate-600 dark:text-slate-300"><x-certification-dates :managements="$certificate->certificateDocuments->flatMap->managements" /></td>
@@ -539,7 +574,7 @@ new class extends Component
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="12" class="px-6 py-14 text-center">
+                            <td colspan="13" class="px-6 py-14 text-center">
                                 <p class="font-semibold">No se encontraron certificados</p>
                                 <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
                                     No existen registros que coincidan con la búsqueda.
@@ -582,11 +617,16 @@ new class extends Component
                             identificados por tener un NIV con menos o más de 17 caracteres.
                         @elseif ($deleteRecordFilter === 'invalid_records')
                             identificados por contener uno o más campos inválidos.
+                        @elseif ($deleteCategoryFilter !== 'all')
+                            de la categoría {{ $deleteCategoryFilter === 'importados' ? 'Importados' : 'Nacional' }}.
                         @else
                             del maestro completo.
                         @endif
                         Esta acción no se puede deshacer.
                     </p>
+                    @if ($deleteCategoryFilter !== 'all' && ($deleteSearch !== '' || $deleteRecordFilter !== 'all'))
+                        <p class="mt-2 text-sm font-semibold text-slate-700 dark:text-slate-200">Categoría: {{ $deleteCategoryFilter === 'importados' ? 'Importados' : 'Nacional' }}</p>
+                    @endif
 
                     <div class="mt-7 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                         <button wire:click="closeDeleteConfirmation" type="button" class="rounded-xl border border-slate-300 px-5 py-3 font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-white/15 dark:text-slate-200 dark:hover:bg-white/5">

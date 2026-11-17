@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\MotorcycleSerialRequest;
+use App\Models\NivComplianceCertificate;
 use App\Models\Product;
 use App\Models\User;
 use App\UserPermission;
@@ -603,6 +604,46 @@ test('product form is read only without edit permission', function () {
         ->assertDontSee('Guardar');
 
     $this->get(route('products.create'))->assertForbidden();
+});
+
+test('a product form counts its linked certificates and opens the list filtered by that product', function () {
+    $this->actingAs(User::factory()->create(['permissions' => [UserPermission::ViewProducts->value, UserPermission::ViewNivComplianceCertificates->value]]));
+    $product = Product::factory()->create();
+    $otherProduct = Product::factory()->create();
+    $certificates = NivComplianceCertificate::factory()->count(2)->create(['product_id' => $product->id]);
+    $otherCertificate = NivComplianceCertificate::factory()->create(['product_id' => $otherProduct->id]);
+    $unlinked = NivComplianceCertificate::factory()->create();
+    $filteredUrl = route('niv_compliance_certificates.index', ['product' => $product->id]);
+
+    $component = Livewire::test('product-manager', ['formOnly' => true, 'productId' => $product->id])
+        ->assertSet('formReadOnly', true)->assertSee('Cantidad de constancias')->assertSee('Ver constancias')->assertSee($filteredUrl);
+    expect($component->instance()->complianceCertificateCount())->toBe(2);
+
+    $this->get($filteredUrl)->assertSuccessful()
+        ->assertSee($certificates->first()->certificate_number)->assertSee($certificates->last()->certificate_number)
+        ->assertDontSee($otherCertificate->certificate_number)->assertDontSee($unlinked->certificate_number);
+});
+
+test('a product with no linked certificates displays a zero count and an empty filtered list', function () {
+    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+    $product = Product::factory()->create();
+    $unlinked = NivComplianceCertificate::factory()->create();
+    $component = Livewire::test('product-manager', ['formOnly' => true, 'productId' => $product->id])
+        ->assertSee('Cantidad de constancias')->assertSee('Ver constancias');
+    expect($component->instance()->complianceCertificateCount())->toBe(0);
+    $this->get(route('niv_compliance_certificates.index', ['product' => $product->id]))
+        ->assertSuccessful()->assertSee('No se encontraron constancias.')->assertDontSee($unlinked->certificate_number);
+    $this->get(route('products.create'))->assertSuccessful()->assertDontSee('Cantidad de constancias');
+});
+
+test('product viewers without certificate permission cannot see certificate counts or links', function () {
+    $this->actingAs(User::factory()->create(['permissions' => [UserPermission::ViewProducts->value]]));
+    $product = Product::factory()->create();
+    NivComplianceCertificate::factory()->create(['product_id' => $product->id]);
+    $component = Livewire::test('product-manager', ['formOnly' => true, 'productId' => $product->id])
+        ->assertDontSee('Cantidad de constancias')->assertDontSee('Ver constancias');
+    expect($component->instance()->complianceCertificateCount())->toBe(0);
+    $this->get(route('niv_compliance_certificates.index', ['product' => $product->id]))->assertForbidden();
 });
 
 test('products can be deleted from their form', function () {
