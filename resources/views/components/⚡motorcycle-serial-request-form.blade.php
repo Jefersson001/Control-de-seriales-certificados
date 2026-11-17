@@ -55,6 +55,8 @@ new class extends Component
 
     public string $requestDate = '';
 
+    public string $category = 'nacional';
+
     public bool $showDeleteConfirmation = false;
 
     public bool $showFinalizeConfirmation = false;
@@ -88,6 +90,7 @@ new class extends Component
             ->findOrFail($requestId);
         $this->status = $serialRequest->status->value;
         $this->requestDate = $serialRequest->request_date?->toDateString() ?? '';
+        $this->category = $serialRequest->category;
         $this->persistedDone = $serialRequest->status === MotorcycleSerialRequestStatus::Done;
         $this->managementRecordId = $serialRequest->vehicleIdentificationRecordManagement?->id;
         $this->lines = $serialRequest->lines->map(fn ($line): array => [
@@ -104,10 +107,29 @@ new class extends Component
             ])->all())->all();
     }
 
+    public function updatedCategory(): void
+    {
+        abort_if($this->areLinesReadOnly(), 403);
+
+        $this->reset([
+            'lines',
+            'lineRecordIds',
+            'lineSerialMetadata',
+            'serialModalLineIndex',
+            'serialSearch',
+            'serialWorkbooks',
+            'importMessage',
+            'showFinalizeConfirmation',
+        ]);
+        $this->closeSerialConflictModal();
+        $this->resetValidation();
+        $this->addLine();
+    }
+
     /** @return Collection<int, Product> */
     public function products(): Collection
     {
-        return Product::query()->orderBy('name')->get(['id', 'name', 'niv']);
+        return Product::query()->where('category', $this->category)->orderBy('name')->get(['id', 'name', 'niv']);
     }
 
     /** @return array<int, MotorcycleSerialRequestStatus> */
@@ -263,6 +285,7 @@ new class extends Component
         $this->resetErrorBag('serialWorkbooks');
         $this->importMessage = null;
         $this->validate([
+            'category' => ['required', 'string', Rule::in(['nacional', 'importados'])],
             'serialWorkbooks' => ['required', 'array', 'min:1'],
             'serialWorkbooks.*' => ['file', 'mimes:xlsx', 'max:10240'],
         ], [
@@ -280,34 +303,46 @@ new class extends Component
                 $serials->push(...$extractor->handle($workbook->getRealPath()));
             }
 
-            $serialsByNiv = $serials
+            $serials = $serials
                 ->map(fn (string $serial): string => Str::upper(trim($serial)))
                 ->filter()
-                ->unique()
-                ->groupBy(fn (string $serial): string => substr($serial, 3, 2));
-            $productsByNiv = Product::query()
+                ->unique();
+            $productsByCode = Product::query()
+                ->where('category', $this->category)
+                ->whereIn('brand', ['bera', 'zontes'])
                 ->whereNotNull('niv')
-                ->get(['id', 'name', 'niv'])
-                ->groupBy(fn (Product $product): string => Str::upper(trim((string) $product->niv)));
-            $ignoredSerialCount = $serialsByNiv
-                ->reject(fn ($productSerials, string $niv): bool => $productsByNiv->has($niv))
-                ->sum(fn ($productSerials): int => $productSerials->count());
-            $serialsByNiv = $serialsByNiv
-                ->filter(fn ($productSerials, string $niv): bool => $productsByNiv->has($niv));
+                ->get(['id', 'name', 'brand', 'niv'])
+                ->groupBy(fn (Product $product): string => $product->brand.':'.Str::upper(trim((string) $product->niv)));
+            $serialsByProduct = collect();
+            $matchedProducts = collect();
+            $ignoredSerialCount = 0;
 
-            if ($serialsByNiv->isEmpty()) {
-                throw new \RuntimeException('Se encontraron seriales, pero ninguno corresponde al NIV de un producto registrado.');
-            }
-
-            foreach ($serialsByNiv->keys() as $niv) {
-                $matchingProducts = $productsByNiv->get($niv, collect());
+            foreach ($serials as $serial) {
+                $matchingProducts = $productsByCode->get('bera:'.substr($serial, 3, 2), collect())
+                    ->concat($productsByCode->get('zontes:'.substr($serial, 0, 8), collect()));
 
                 if ($matchingProducts->count() > 1) {
-                    throw new \RuntimeException("El NIV {$niv} está asignado a más de un producto. Corrige el maestro de productos antes de importar.");
+                    throw new \RuntimeException("El serial {$serial} coincide con más de un producto de la categoría seleccionada. Corrige el maestro de productos antes de importar.");
                 }
 
-                if (collect($this->lines)->contains(fn (array $line): bool => (int) ($line['product_id'] ?? 0) === $matchingProducts->first()->id)) {
-                    throw new \RuntimeException("Ya existe una línea para el producto {$matchingProducts->first()->name}. Elimínala antes de cargar este archivo.");
+                if ($matchingProducts->isEmpty()) {
+                    $ignoredSerialCount++;
+
+                    continue;
+                }
+
+                $product = $matchingProducts->first();
+                $matchedProducts->put($product->id, $product);
+                $serialsByProduct->put($product->id, $serialsByProduct->get($product->id, collect())->push($serial));
+            }
+
+            if ($serialsByProduct->isEmpty()) {
+                throw new \RuntimeException('Se encontraron seriales, pero ninguno corresponde a un producto registrado en la categoría seleccionada.');
+            }
+
+            foreach ($matchedProducts as $product) {
+                if (collect($this->lines)->contains(fn (array $line): bool => (int) ($line['product_id'] ?? 0) === $product->id)) {
+                    throw new \RuntimeException("Ya existe una línea para el producto {$product->name}. Elimínala antes de cargar este archivo.");
                 }
             }
 
@@ -317,10 +352,9 @@ new class extends Component
                 $this->lineSerialMetadata = [];
             }
 
-            foreach ($serialsByNiv as $niv => $productSerials) {
-                $product = $productsByNiv->get($niv)->first();
+            foreach ($serialsByProduct as $productId => $productSerials) {
                 $this->lines[] = [
-                    'product_id' => $product->id,
+                    'product_id' => $productId,
                     'quantity' => $productSerials->count(),
                     'serials' => $productSerials->implode("\n"),
                 ];
@@ -329,11 +363,11 @@ new class extends Component
             }
 
             $this->serialWorkbooks = [];
-            $importedSerialCount = $serialsByNiv->sum(fn ($productSerials): int => $productSerials->count());
-            $this->importMessage = $selectedFileCount.' archivo(s) procesado(s): '.$importedSerialCount.' seriales cargados en '.$serialsByNiv->count().' línea(s) de producto.';
+            $importedSerialCount = $serialsByProduct->sum(fn ($productSerials): int => $productSerials->count());
+            $this->importMessage = $selectedFileCount.' archivo(s) procesado(s): '.$importedSerialCount.' seriales cargados en '.$serialsByProduct->count().' línea(s) de producto.';
 
             if ($ignoredSerialCount > 0) {
-                $this->importMessage .= ' Se ignoraron '.$ignoredSerialCount.' seriales cuyo NIV no pertenece a un producto registrado.';
+                $this->importMessage .= ' Se ignoraron '.$ignoredSerialCount.' seriales sin coincidencia con un producto de la categoría seleccionada.';
             }
         } catch (\RuntimeException $exception) {
             $this->addError('serialWorkbooks', $exception->getMessage());
@@ -459,17 +493,20 @@ new class extends Component
 
         $validated = $this->validate([
             'requestDate' => ['nullable', 'date'],
+            'category' => ['required', 'string', Rule::in(['nacional', 'importados'])],
             'lines' => ['required', 'array', 'min:1'],
-            'lines.*.product_id' => ['required', 'integer', 'distinct', Rule::exists((new Product)->getTable(), 'id')],
+            'lines.*.product_id' => ['required', 'integer', 'distinct', Rule::exists((new Product)->getTable(), 'id')->where('category', $this->category)],
             'lines.*.quantity' => ['required', 'integer', 'min:1'],
             'lines.*.serials' => ['required', 'string'],
             'status' => ['required', Rule::enum(MotorcycleSerialRequestStatus::class)],
         ], [
             'requestDate.date' => 'La fecha seleccionada no es válida.',
+            'category.required' => 'Selecciona la categoría de la solicitud.',
+            'category.in' => 'La categoría debe ser Nacional o Importados.',
             'lines.required' => 'Agrega al menos una línea.',
             'lines.min' => 'Agrega al menos una línea.',
             'lines.*.product_id.required' => 'Selecciona un producto.',
-            'lines.*.product_id.exists' => 'El producto seleccionado no existe.',
+            'lines.*.product_id.exists' => 'El producto seleccionado no existe o no pertenece a la categoría de la solicitud.',
             'lines.*.product_id.distinct' => 'No puedes repetir el mismo producto.',
             'lines.*.quantity.required' => 'Ingresa la cantidad.',
             'lines.*.quantity.integer' => 'La cantidad debe ser un número entero.',
@@ -530,11 +567,16 @@ new class extends Component
             return null;
         }
 
+        $validated['status'] = $finalizing
+            ? MotorcycleSerialRequestStatus::Done->value
+            : MotorcycleSerialRequestStatus::InProgress->value;
+
         [$serialRequest, $message] = DB::transaction(function () use ($validated, $finalizing): array {
             if ($this->requestId === null) {
                 $serialRequest = MotorcycleSerialRequest::create([
                     'user_id' => auth()->id(),
                     'request_date' => $validated['requestDate'],
+                    'category' => $validated['category'],
                     'status' => $validated['status'],
                 ]);
                 $message = 'Solicitud creada correctamente.';
@@ -542,6 +584,7 @@ new class extends Component
                 $serialRequest = MotorcycleSerialRequest::query()->findOrFail($this->requestId);
                 $serialRequest->update([
                     'request_date' => $validated['requestDate'],
+                    'category' => $validated['category'],
                     'status' => $validated['status'],
                 ]);
                 $serialRequest->lines()->delete();
@@ -582,6 +625,8 @@ new class extends Component
 
             return [$serialRequest, $message];
         });
+
+        $this->status = $serialRequest->status->value;
 
         return redirect()
             ->route('motorcycle_serial_requests.edit', $serialRequest)
@@ -668,6 +713,14 @@ new class extends Component
                     <input id="request-date" wire:model="requestDate" type="date" @disabled($this->isReadOnly()) class="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-950 outline-none transition focus:border-violet-500 focus:ring-4 focus:ring-violet-500/10 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 dark:border-white/10 dark:bg-slate-950/40 dark:text-white dark:focus:border-violet-400 dark:disabled:bg-white/5">
                     @error('requestDate') <p class="mt-2 text-sm text-rose-600 dark:text-rose-300">{{ $message }}</p> @enderror
                 </div>
+                <div>
+                    <label for="request-category" class="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-200">Categoría</label>
+                    <select id="request-category" wire:model.live="category" required @disabled($this->isReadOnly()) class="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-950 outline-none transition focus:border-violet-500 focus:ring-4 focus:ring-violet-500/10 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 dark:border-white/10 dark:bg-slate-950/40 dark:text-white dark:focus:border-violet-400 dark:disabled:bg-white/5">
+                        <option value="nacional">Nacional</option>
+                        <option value="importados">Importados</option>
+                    </select>
+                    @error('category') <p class="mt-2 text-sm text-rose-600 dark:text-rose-300">{{ $message }}</p> @enderror
+                </div>
                 @if ($managementRecordId !== null)
                     <div>
                         <p class="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-200">Gestión de constancia relacionada</p>
@@ -717,7 +770,7 @@ new class extends Component
                                     <li wire:key="selected-workbook-{{ $loop->index }}" class="truncate">{{ $workbook->getClientOriginalName() }}</li>
                                 @endforeach
                             </ul>
-                            <p class="mt-2 text-sm text-violet-700 dark:text-violet-300">Se analizarán todas las hojas de cada archivo. Las posiciones 4 y 5 de cada serial deben coincidir con el NIV de un producto registrado.</p>
+                            <p class="mt-2 text-sm text-violet-700 dark:text-violet-300">Se analizarán todas las hojas de cada archivo y se buscarán productos solo en la categoría seleccionada. Bera se identifica por las posiciones 4 y 5; Zontes, por los primeros 8 caracteres del NIV.</p>
                         </div>
                         <button wire:click="importSerialWorkbook" wire:loading.attr="disabled" wire:target="importSerialWorkbook" type="button" class="shrink-0 rounded-xl bg-violet-600 px-5 py-3 font-semibold text-white transition hover:bg-violet-500 disabled:cursor-wait disabled:opacity-60">
                             <span wire:loading.remove wire:target="importSerialWorkbook">Procesar Excel</span>
@@ -790,7 +843,7 @@ new class extends Component
             @error('lines') <p class="mt-3 text-sm text-rose-600 dark:text-rose-300">{{ $message }}</p> @enderror
 
             @if ($this->products()->isEmpty())
-                <p class="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200">No existen productos registrados. Crea primero un producto desde Configuración → Productos.</p>
+                <p class="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200">No existen productos en la categoría seleccionada. Registra los productos de esa categoría desde Configuración → Productos.</p>
             @endif
 
             @if ($persistedDone)

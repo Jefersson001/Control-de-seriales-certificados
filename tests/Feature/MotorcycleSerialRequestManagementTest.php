@@ -78,7 +78,7 @@ test('requests can be filtered by status', function () {
         ->assertDontSee('02/08/2026');
 });
 
-test('authorized users can create a draft request related to a product', function () {
+test('saving a new request moves it from draft to in progress', function () {
     $user = User::factory()->create([
         'permissions' => [
             UserPermission::ViewMotorcycleSerialRequests->value,
@@ -93,6 +93,10 @@ test('authorized users can create a draft request related to a product', functio
         ->assertSet('status', MotorcycleSerialRequestStatus::Draft->value)
         ->assertSet('lines.0.quantity', 1)
         ->assertSet('requestDate', now()->toDateString())
+        ->assertSet('category', 'nacional')
+        ->assertSee('Categoría')
+        ->assertSee('Nacional')
+        ->assertSee('Importados')
         ->assertDontSee('Usuario creador')
         ->assertSee('Fecha')
         ->set('requestDate', '2026-08-03')
@@ -108,7 +112,128 @@ test('authorized users can create a draft request related to a product', functio
         ->and($serialRequest->user->is($user))->toBeTrue()
         ->and($serialRequest->request_date?->toDateString())->toBe('2026-08-03')
         ->and($serialRequest->lines()->first()->quantity)->toBe(25)
-        ->and($serialRequest->status)->toBe(MotorcycleSerialRequestStatus::Draft);
+        ->and($serialRequest->status)->toBe(MotorcycleSerialRequestStatus::InProgress);
+    expect($serialRequest->category)->toBe('nacional');
+});
+
+test('requests can be created with either category', function (string $category) {
+    $user = User::factory()->create(['role' => UserRole::Admin]);
+    $product = Product::factory()->create(['category' => $category]);
+    $this->actingAs($user);
+
+    Livewire::test('motorcycle-serial-request-form')
+        ->set('category', $category)
+        ->set('lines.0.product_id', $product->id)
+        ->set('lines.0.serials', 'SERIAL-CATEGORIA')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    expect(MotorcycleSerialRequest::query()->sole())
+        ->category->toBe($category)
+        ->status->toBe(MotorcycleSerialRequestStatus::InProgress);
+})->with(['nacional', 'importados']);
+
+test('saving an existing request keeps it in progress in either category', function (MotorcycleSerialRequestStatus $status, string $category) {
+    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+    $serialRequest = MotorcycleSerialRequest::factory()->create(['status' => $status, 'category' => $category]);
+    $serialRequest->lines()->first()->product->update(['category' => $category]);
+
+    Livewire::test('motorcycle-serial-request-form', ['requestId' => $serialRequest->id])
+        ->call('save')
+        ->assertHasNoErrors()
+        ->assertSet('status', MotorcycleSerialRequestStatus::InProgress->value);
+
+    expect($serialRequest->refresh()->status)->toBe(MotorcycleSerialRequestStatus::InProgress);
+})->with([MotorcycleSerialRequestStatus::Draft, MotorcycleSerialRequestStatus::InProgress])
+    ->with(['nacional', 'importados']);
+
+test('unsuccessful saves do not advance the request status', function (bool $duplicateSerials) {
+    Storage::fake('local');
+    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+    $serialRequest = MotorcycleSerialRequest::factory()->create(['status' => MotorcycleSerialRequestStatus::Draft]);
+    $component = Livewire::test('motorcycle-serial-request-form', ['requestId' => $serialRequest->id]);
+
+    if ($duplicateSerials) {
+        $component->set('lines.0.serials', "SERIAL-REPETIDO\nSERIAL-REPETIDO")
+            ->call('save')
+            ->assertSet('showSerialConflictModal', true);
+    } else {
+        $component->set('lines.0.quantity', 0)
+            ->call('save')
+            ->assertHasErrors(['lines.0.quantity' => 'min']);
+    }
+
+    $component->assertSet('status', MotorcycleSerialRequestStatus::Draft->value);
+    expect($serialRequest->refresh()->status)->toBe(MotorcycleSerialRequestStatus::Draft);
+})->with([false, true]);
+
+test('a request category can be loaded and changed', function () {
+    $serialRequest = MotorcycleSerialRequest::factory()->create([
+        'status' => MotorcycleSerialRequestStatus::Draft,
+        'category' => 'importados',
+    ]);
+    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+
+    Livewire::test('motorcycle-serial-request-form', ['requestId' => $serialRequest->id])
+        ->assertSet('category', 'importados')
+        ->set('category', 'nacional')
+        ->assertSet('lines', [['product_id' => null, 'quantity' => 1, 'serials' => '']])
+        ->assertSet('lineRecordIds', [null])
+        ->assertSet('lineSerialMetadata', [[]])
+        ->set('lines.0.product_id', $serialRequest->lines()->first()->product_id)
+        ->set('lines.0.serials', 'SERIAL-NUEVA-CATEGORIA')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    expect($serialRequest->refresh()->category)->toBe('nacional');
+});
+
+test('requests reject missing or unknown categories', function (string $category, string $rule) {
+    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+    $product = Product::factory()->create();
+
+    Livewire::test('motorcycle-serial-request-form')
+        ->set('category', $category)
+        ->set('lines.0.product_id', $product->id)
+        ->set('lines.0.serials', 'SERIAL-CATEGORIA')
+        ->call('save')
+        ->assertHasErrors(['category' => $rule]);
+
+    expect(MotorcycleSerialRequest::query()->count())->toBe(0);
+})->with([
+    ['', 'required'],
+    ['otra', 'in'],
+]);
+
+test('request categories cannot be changed without editing access', function (bool $done) {
+    $serialRequest = MotorcycleSerialRequest::factory()->create([
+        'status' => $done ? MotorcycleSerialRequestStatus::Done : MotorcycleSerialRequestStatus::Draft,
+        'category' => 'importados',
+    ]);
+    $user = User::factory()->create([
+        'permissions' => $done
+            ? [UserPermission::ViewMotorcycleSerialRequests->value, UserPermission::EditMotorcycleSerialRequests->value]
+            : [UserPermission::ViewMotorcycleSerialRequests->value],
+    ]);
+    $this->actingAs($user);
+
+    Livewire::test('motorcycle-serial-request-form', ['requestId' => $serialRequest->id])
+        ->assertSet('category', 'importados')
+        ->assertSeeHtml('id="request-category" wire:model.live="category" required disabled')
+        ->set('category', 'nacional')
+        ->assertForbidden();
+
+    expect($serialRequest->refresh()->category)->toBe('importados');
+})->with([false, true]);
+
+test('the request category migration assigns national to existing requests', function () {
+    $serialRequest = MotorcycleSerialRequest::factory()->create();
+    $migration = require database_path('migrations/2026_11_17_164843_add_category_to_motorcycle_serial_requests_table.php');
+
+    $migration->down();
+    $migration->up();
+
+    expect($serialRequest->refresh()->category)->toBe('nacional');
 });
 
 test('the creator of an existing request cannot be changed while editing', function () {
@@ -355,6 +480,176 @@ test('multiple workbooks are processed together and grouped into their correspon
         ->assertSet('lines.1.quantity', 1)
         ->assertSet('serialWorkbooks', [])
         ->assertSet('importMessage', '2 archivo(s) procesado(s): 4 seriales cargados en 2 línea(s) de producto.');
+});
+
+test('mixed workbooks only import products in the selected category', function (string $category) {
+    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+    $national = Product::factory()->create(['brand' => 'bera', 'category' => 'nacional', 'niv' => 'C7']);
+    $imported = Product::factory()->create(['brand' => 'zontes', 'category' => 'importados', 'niv' => 'LD3THK5B']);
+    Product::factory()->create(['brand' => 'bera', 'category' => 'importados', 'niv' => 'C7']);
+    Product::factory()->create(['brand' => 'zontes', 'category' => 'nacional', 'niv' => 'LD3THK5B']);
+    $path = createMotorcycleSerialWorkbook([['8YZC7MCC9TD033582'], ['LD3THK5B6V1700114']]);
+    $upload = UploadedFile::fake()->createWithContent('Mezclado.xlsx', file_get_contents($path));
+    unlink($path);
+
+    $component = Livewire::test('motorcycle-serial-request-form')
+        ->set('category', $category)
+        ->set('serialWorkbooks', [$upload])
+        ->call('importSerialWorkbook')
+        ->assertHasNoErrors();
+
+    /** @var list<array{product_id: int, quantity: int, serials: string}> $lines */
+    $lines = $component->get('lines');
+    expect($lines)->toHaveCount(2);
+    expect(collect($lines)->pluck('product_id')->all())->toContain($category === 'nacional' ? $national->id : $imported->id);
+
+    $component->call('save')->assertHasNoErrors();
+    $request = MotorcycleSerialRequest::query()->sole();
+    expect($request->category)->toBe($category)
+        ->and($request->lines()->whereHas('product', fn ($query) => $query->where('category', '!=', $category))->exists())->toBeFalse();
+})->with(['nacional', 'importados']);
+
+test('zontes imports distinguish all three prefixes across multiple workbooks', function () {
+    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+    $first = Product::factory()->create(['brand' => 'zontes', 'category' => 'importados', 'niv' => 'LD3THK5B']);
+    $second = Product::factory()->create(['brand' => 'zontes', 'category' => 'importados', 'niv' => 'LD3THR6B']);
+    $third = Product::factory()->create(['brand' => 'zontes', 'category' => 'importados', 'niv' => 'LD3PWW6A']);
+    Product::factory()->create(['brand' => 'bera', 'category' => 'nacional', 'niv' => 'TH']);
+    Product::factory()->create(['brand' => 'morini', 'category' => 'importados', 'niv' => 'TH']);
+    $firstPath = createMotorcycleSerialWorkbook([['ld3thk5b6v1700114'], ['LD3THR6B5V1601632']]);
+    $secondPath = createMotorcycleSerialWorkbook([['LD3THK5B6V1700114'], ['LD3PWW6A3V1600525'], ['LD3THK5C6V1700114']]);
+    $uploads = [
+        UploadedFile::fake()->createWithContent('Primero.xlsx', file_get_contents($firstPath)),
+        UploadedFile::fake()->createWithContent('Segundo.xlsx', file_get_contents($secondPath)),
+    ];
+    unlink($firstPath);
+    unlink($secondPath);
+
+    Livewire::test('motorcycle-serial-request-form')
+        ->set('category', 'importados')
+        ->set('serialWorkbooks', $uploads)
+        ->call('importSerialWorkbook')
+        ->assertHasNoErrors()
+        ->assertSet('lines.0.product_id', $first->id)
+        ->assertSet('lines.0.quantity', 1)
+        ->assertSet('lines.1.product_id', $second->id)
+        ->assertSet('lines.2.product_id', $third->id)
+        ->assertSet('importMessage', '2 archivo(s) procesado(s): 3 seriales cargados en 3 línea(s) de producto. Se ignoraron 1 seriales sin coincidencia con un producto de la categoría seleccionada.')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    expect(MotorcycleSerialRequest::query()->sole()->lines()->count())->toBe(3);
+});
+
+test('imports without matches in the selected category leave existing lines untouched', function () {
+    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+    Product::factory()->create(['brand' => 'zontes', 'category' => 'importados', 'niv' => 'LD3THK5B']);
+    $path = createMotorcycleSerialWorkbook([['LD3THK5B6V1700114']]);
+    $upload = UploadedFile::fake()->createWithContent('Importadas.xlsx', file_get_contents($path));
+    unlink($path);
+
+    Livewire::test('motorcycle-serial-request-form')
+        ->set('serialWorkbooks', [$upload])
+        ->call('importSerialWorkbook')
+        ->assertHasErrors(['serialWorkbooks'])
+        ->assertSee('ninguno corresponde a un producto registrado en la categoría seleccionada')
+        ->assertSet('lines', [['product_id' => null, 'quantity' => 1, 'serials' => '']]);
+});
+
+test('ambiguous zontes prefixes are rejected before adding any lines', function () {
+    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+    Product::factory()->count(2)->create(['brand' => 'zontes', 'category' => 'importados', 'niv' => 'LD3THR6B']);
+    $path = createMotorcycleSerialWorkbook([['LD3THR6B5V1601632']]);
+    $upload = UploadedFile::fake()->createWithContent('368.xlsx', file_get_contents($path));
+    unlink($path);
+
+    Livewire::test('motorcycle-serial-request-form')
+        ->set('category', 'importados')
+        ->set('serialWorkbooks', [$upload])
+        ->call('importSerialWorkbook')
+        ->assertHasErrors(['serialWorkbooks'])
+        ->assertSee('coincide con más de un producto')
+        ->assertSet('lines', [['product_id' => null, 'quantity' => 1, 'serials' => '']]);
+});
+
+test('product selection and saving respect the request category', function () {
+    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+    $national = Product::factory()->create(['name' => 'Producto nacional', 'category' => 'nacional']);
+    $imported = Product::factory()->create(['name' => 'Producto importado', 'category' => 'importados']);
+
+    Livewire::test('motorcycle-serial-request-form')
+        ->assertSee($national->name)
+        ->assertDontSee($imported->name)
+        ->set('category', 'importados')
+        ->assertSee($imported->name)
+        ->assertDontSee($national->name)
+        ->set('lines.0.product_id', $national->id)
+        ->set('lines.0.serials', 'SERIAL-CATEGORIA')
+        ->call('save')
+        ->assertHasErrors(['lines.0.product_id' => 'exists']);
+
+    expect(MotorcycleSerialRequest::query()->count())->toBe(0);
+});
+
+test('changing category clears imported serials pending workbooks and modal state', function (string $category) {
+    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+    $national = Product::factory()->create(['brand' => 'bera', 'category' => 'nacional', 'niv' => 'C7']);
+    $imported = Product::factory()->create(['brand' => 'zontes', 'category' => 'importados', 'niv' => 'LD3THK5B']);
+    $path = createMotorcycleSerialWorkbook([['8YZC7MCC9TD033582'], ['LD3THK5B6V1700114']]);
+    $upload = UploadedFile::fake()->createWithContent('Seriales.xlsx', file_get_contents($path));
+    unlink($path);
+    $nextCategory = $category === 'nacional' ? 'importados' : 'nacional';
+
+    Livewire::test('motorcycle-serial-request-form')
+        ->set('category', $category)
+        ->set('requestDate', '2026-11-01')
+        ->set('status', MotorcycleSerialRequestStatus::InProgress->value)
+        ->set('serialWorkbooks', [$upload])
+        ->call('importSerialWorkbook')
+        ->assertHasNoErrors()
+        ->assertSet('lines.0.product_id', $category === 'nacional' ? $national->id : $imported->id)
+        ->call('openSerialModal', 0)
+        ->set('serialSearch', 'BUSQUEDA')
+        ->set('serialWorkbooks', [$upload])
+        ->set('category', $nextCategory)
+        ->assertSet('lines', [['product_id' => null, 'quantity' => 1, 'serials' => '']])
+        ->assertSet('lineRecordIds', [null])
+        ->assertSet('lineSerialMetadata', [[]])
+        ->assertSet('serialModalLineIndex', null)
+        ->assertSet('serialSearch', '')
+        ->assertSet('serialWorkbooks', [])
+        ->assertSet('importMessage', null)
+        ->assertSet('requestDate', '2026-11-01')
+        ->assertSet('status', MotorcycleSerialRequestStatus::InProgress->value)
+        ->set('serialWorkbooks', [$upload])
+        ->call('importSerialWorkbook')
+        ->assertHasNoErrors()
+        ->assertSet('lines.0.product_id', $nextCategory === 'nacional' ? $national->id : $imported->id)
+        ->assertSet('lines.0.quantity', 1);
+})->with(['nacional', 'importados']);
+
+test('changing category clears duplicate serial conflicts and their download', function () {
+    Storage::fake('local');
+    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+    $product = Product::factory()->create();
+
+    $component = Livewire::test('motorcycle-serial-request-form')
+        ->set('lines.0.product_id', $product->id)
+        ->set('lines.0.serials', "SERIAL-REPETIDO\nSERIAL-REPETIDO")
+        ->call('save')
+        ->assertSet('showSerialConflictModal', true);
+
+    $conflictPath = $component->get('serialConflictFilePath');
+    Storage::disk('local')->assertExists($conflictPath);
+
+    $component->set('category', 'importados')
+        ->assertSet('showSerialConflictModal', false)
+        ->assertSet('serialConflictMessage', '')
+        ->assertSet('serialConflictFileName', null)
+        ->assertSet('serialConflictFilePath', null)
+        ->assertSet('lines', [['product_id' => null, 'quantity' => 1, 'serials' => '']]);
+
+    Storage::disk('local')->assertMissing($conflictPath);
 });
 
 test('the only product line can be removed before saving', function () {

@@ -5,6 +5,7 @@ namespace App\Models;
 use App\MotorcycleSerialRequestStatus;
 use Database\Factories\MotorcycleSerialRequestFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -16,13 +17,14 @@ use Illuminate\Support\Carbon;
  * @property int $id
  * @property int|null $user_id
  * @property Carbon|null $request_date
+ * @property string $category
  * @property MotorcycleSerialRequestStatus $status
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  * @property-read User|null $user
- * @property-read \Illuminate\Database\Eloquent\Collection<int, MotorcycleSerialRequestLine> $lines
+ * @property-read Collection<int, MotorcycleSerialRequestLine> $lines
  */
-#[Fillable(['user_id', 'request_date', 'status'])]
+#[Fillable(['user_id', 'request_date', 'category', 'status'])]
 class MotorcycleSerialRequest extends Model
 {
     /** @use HasFactory<MotorcycleSerialRequestFactory> */
@@ -30,6 +32,7 @@ class MotorcycleSerialRequest extends Model
 
     protected $attributes = [
         'status' => MotorcycleSerialRequestStatus::Draft->value,
+        'category' => 'nacional',
     ];
 
     /** @return BelongsTo<User, $this> */
