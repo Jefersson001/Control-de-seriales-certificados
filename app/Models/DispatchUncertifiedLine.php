@@ -9,11 +9,13 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 #[Fillable(['dispatch_id', 'product_id', 'niv'])]
 class DispatchUncertifiedLine extends Model
 {
+    /** @return BelongsTo<Dispatch, $this> */
     public function dispatch(): BelongsTo
     {
         return $this->belongsTo(Dispatch::class);
     }
 
+    /** @return BelongsTo<Product, $this> */
     public function product(): BelongsTo
     {
         return $this->belongsTo(Product::class);

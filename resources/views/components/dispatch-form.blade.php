@@ -182,6 +182,8 @@ new class extends Component
             }
 
             $this->selectedIds = array_values(array_unique($this->selectedIds));
+            $alreadyDispatched = array_flip($result['alreadyDispatched']);
+            $this->uncertifiedRecords = array_values(array_filter($this->uncertifiedRecords, fn (array $record): bool => ! $existingNivs->has($record['niv']) && ! isset($alreadyDispatched[$record['niv']])));
             $existingUncertifiedNivs = collect($this->uncertifiedRecords)->pluck('niv')->flip();
 
             foreach ($result['notFoundRecords'] as $record) {
@@ -197,6 +199,8 @@ new class extends Component
 
             $this->importPdfMessage = $this->buildImportPdfMessage($result, $added);
             unset($this->selectedRecords);
+        } catch (RuntimeException $exception) {
+            $this->addError('importPdf', $exception->getMessage());
         } catch (Throwable $exception) {
             report($exception);
             $this->addError('importPdf', 'No fue posible leer el PDF. Verifica que el archivo no esté dañado.');
@@ -321,6 +325,13 @@ new class extends Component
                     'status' => $this->status,
                 ])
                 : Dispatch::query()->lockForUpdate()->findOrFail($this->dispatchId);
+
+            if ($dispatch->status === DispatchStatus::Done) {
+                throw new RuntimeException('El despacho ya fue finalizado desde otra sesión. Actualiza la página para consultarlo.');
+            }
+            if (! in_array($this->status, [DispatchStatus::Draft->value, DispatchStatus::InProgress->value], true)) {
+                throw new RuntimeException('El estado Hecho se asigna únicamente al finalizar el despacho.');
+            }
 
             if ($this->dispatchId !== null) {
                 $dispatch->update([
@@ -543,7 +554,7 @@ new class extends Component
     @if ($showFinalizeConfirmation)
         <div class="fixed inset-0 z-50 overflow-y-auto" role="dialog" aria-modal="true">
             <button wire:click="closeFinalizeConfirmation" type="button" class="fixed inset-0 bg-slate-950/70 backdrop-blur-sm"></button>
-            <div class="relative flex min-h-full items-center justify-center p-4"><div class="w-full max-w-lg rounded-3xl bg-white p-7 text-center shadow-2xl dark:bg-slate-900"><div class="mx-auto grid size-14 place-items-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">✓</div><h3 class="mt-5 text-2xl font-semibold">¿Finalizar este despacho?</h3><p class="mt-3 leading-7 text-slate-600 dark:text-slate-300">Los {{ count($selectedIds) }} registros cambiarán de Por despachar a Despachado y el formulario quedará bloqueado.</p><div class="mt-7 flex justify-center gap-3"><button wire:click="closeFinalizeConfirmation" type="button" class="rounded-xl border border-slate-300 px-5 py-3 font-semibold dark:border-white/15">Cancelar</button><button wire:click="finalize" wire:loading.attr="disabled" wire:target="finalize" type="button" class="rounded-xl bg-emerald-600 px-7 py-3 font-semibold text-white hover:bg-emerald-500 disabled:opacity-60"><span wire:loading.remove wire:target="finalize">Sí, finalizar</span><span wire:loading wire:target="finalize">Finalizando...</span></button></div></div></div>
+            <div class="relative flex min-h-full items-center justify-center p-4"><div class="w-full max-w-lg rounded-3xl bg-white p-7 text-center shadow-2xl dark:bg-slate-900"><div class="mx-auto grid size-14 place-items-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">✓</div><h3 class="mt-5 text-2xl font-semibold">¿Finalizar este despacho?</h3><p class="mt-3 leading-7 text-slate-600 dark:text-slate-300">Se finalizarán {{ count($selectedIds) + count($uncertifiedRecords) }} NIV: {{ count($selectedIds) }} certificados y {{ count($uncertifiedRecords) }} sin certificar. Los certificados pasarán a Despachado. Los demás conservarán su identificación como sin certificar. El formulario quedará bloqueado.</p><div class="mt-7 flex justify-center gap-3"><button wire:click="closeFinalizeConfirmation" type="button" class="rounded-xl border border-slate-300 px-5 py-3 font-semibold dark:border-white/15">Cancelar</button><button wire:click="finalize" wire:loading.attr="disabled" wire:target="finalize" type="button" class="rounded-xl bg-emerald-600 px-7 py-3 font-semibold text-white hover:bg-emerald-500 disabled:opacity-60"><span wire:loading.remove wire:target="finalize">Sí, finalizar</span><span wire:loading wire:target="finalize">Finalizando...</span></button></div></div></div>
         </div>
     @endif
 </div>

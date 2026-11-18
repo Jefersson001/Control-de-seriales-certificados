@@ -25,7 +25,7 @@ class MsCertificadoFactory extends Factory
             'tipo' => fake()->randomElement(['Sedán', 'SUV', 'Camión', 'Motocicleta']),
             'fabricacion' => fake()->randomElement(['Nacional', 'Importado']),
             'anio' => fake()->numberBetween(1990, (int) date('Y')),
-            'niv' => fake()->unique()->bothify('?????????########'),
+            'niv' => fake()->unique()->regexify('8YZ[A-HJ-NPR-Z0-9]{5}[0-9X][A-HJ-NPR-Z0-9]{2}[0-9]{6}'),
             'status' => CertificateStatus::PendingDispatch,
             'codigo' => fake()->unique()->bothify('COD-####-????'),
         ];

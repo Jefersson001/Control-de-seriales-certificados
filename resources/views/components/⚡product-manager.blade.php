@@ -96,21 +96,25 @@ new class extends Component
 
     public function updatedBrand(): void
     {
-        if ($this->brand === 'zontes' && $this->firstValue === '') {
-            $this->firstValue = 'LD3';
+        if ($this->editingProductId === null && in_array($this->brand, ['zontes', 'morini'], true)) {
+            $this->category = 'importados';
         }
 
-        $this->synchronizeZontesNiv();
+        if (in_array($this->brand, ['zontes', 'morini'], true) && in_array($this->firstValue, ['', 'LD3', 'HL4'], true)) {
+            $this->firstValue = $this->brand === 'morini' ? 'HL4' : 'LD3';
+        }
+
+        $this->synchronizeImportedNiv();
     }
 
     public function updatedFirstValue(): void
     {
-        $this->synchronizeZontesNiv();
+        $this->synchronizeImportedNiv();
     }
 
     public function updatedSecondValue(): void
     {
-        $this->synchronizeZontesNiv();
+        $this->synchronizeImportedNiv();
     }
 
     public function updatedPerPage(mixed $value): void
@@ -179,7 +183,12 @@ new class extends Component
         $this->authorizePermission($requiredPermission);
 
         $this->description = trim($this->description);
-        $this->synchronizeZontesNiv();
+        $this->synchronizeImportedNiv();
+        $originalProduct = $this->editingProductId === null ? null : Product::query()->findOrFail($this->editingProductId);
+        $validateBeraCode = $this->brand === 'bera' && ($originalProduct === null || $originalProduct->brand !== $this->brand || $originalProduct->niv !== $this->niv);
+        if ($this->brand === 'bera') {
+            $this->niv = Str::upper(trim($this->niv));
+        }
         $nameRule = Rule::unique((new Product)->getTable(), 'name');
 
         if ($this->editingProductId !== null) {
@@ -190,9 +199,9 @@ new class extends Component
             'description' => ['required', 'string', 'max:255', $nameRule],
             'category' => ['required', 'string', Rule::in(['nacional', 'importados'])],
             'brand' => ['required', 'string', Rule::in(['bera', 'zontes', 'morini'])],
-            'firstValue' => [Rule::when($this->brand === 'zontes', ['required', Rule::in(['LD3'])], ['nullable']), 'string', 'max:255'],
-            'secondValue' => [Rule::when($this->brand === 'zontes', ['required', 'regex:/^[A-HJ-NPR-Z0-9]{5}$/'], ['nullable']), 'string', 'max:255'],
-            'niv' => ['nullable', 'string', 'max:50'],
+            'firstValue' => [Rule::when(in_array($this->brand, ['zontes', 'morini'], true), ['required', Rule::in([$this->brand === 'morini' ? 'HL4' : 'LD3'])], ['nullable']), 'string', 'max:255'],
+            'secondValue' => [Rule::when(in_array($this->brand, ['zontes', 'morini'], true), ['required', 'regex:/^[A-HJ-NPR-Z0-9]{5}$/'], ['nullable']), 'string', 'max:255'],
+            'niv' => ['nullable', 'string', 'max:50', Rule::when($validateBeraCode, ['regex:/^[A-HJ-NPR-Z0-9]{2}$/'])],
         ], [
             'description.required' => 'Ingresa la descripción del producto.',
             'category.required' => 'Selecciona la categoría del producto.',
@@ -202,13 +211,21 @@ new class extends Component
             'description.unique' => 'Ya existe un producto con esta descripción.',
             'description.max' => 'La descripción no puede superar los 255 caracteres.',
             'firstValue.max' => 'El campo 1ero no puede superar los 255 caracteres.',
-            'firstValue.required' => 'Ingresa LD3 en el campo 1ero para Zontes.',
-            'firstValue.in' => 'El campo 1ero debe ser LD3 para Zontes.',
+            'firstValue.required' => 'Ingresa '.($this->brand === 'morini' ? 'HL4 para Morini' : 'LD3 para Zontes').' en el campo 1ero.',
+            'firstValue.in' => 'El campo 1ero debe ser '.($this->brand === 'morini' ? 'HL4 para Morini.' : 'LD3 para Zontes.'),
             'secondValue.max' => 'El campo 2do no puede superar los 255 caracteres.',
-            'secondValue.required' => 'Ingresa el código del modelo Zontes en el campo 2do.',
-            'secondValue.regex' => 'El código del modelo Zontes debe tener 5 letras o números válidos para un NIV, sin I, O ni Q.',
+            'secondValue.required' => 'Ingresa el código del modelo en el campo 2do.',
+            'secondValue.regex' => 'El código del modelo debe tener 5 letras o números válidos para un NIV, sin I, O ni Q.',
             'niv.max' => 'El NIV no puede superar los 50 caracteres.',
+            'niv.regex' => 'El código NIV de Bera debe tener los dos caracteres que ocupan las posiciones 4 y 5 del serial.',
         ]);
+
+        if ($this->niv !== '' && ($originalProduct === null || $originalProduct->niv !== $this->niv || $originalProduct->category !== $this->category || $originalProduct->brand !== $this->brand)
+            && Product::query()->where('brand', $this->brand)->where('category', $this->category)->where('niv', $this->niv)->when($this->editingProductId !== null, fn ($query) => $query->whereKeyNot($this->editingProductId))->exists()) {
+            $this->addError('niv', 'Ya existe un producto de esta marca y categoría con el mismo código NIV.');
+
+            return;
+        }
 
         $productData = [
             'name' => $validated['description'],
@@ -345,9 +362,9 @@ new class extends Component
         $this->resetValidation();
     }
 
-    private function synchronizeZontesNiv(): void
+    private function synchronizeImportedNiv(): void
     {
-        if ($this->brand !== 'zontes') {
+        if (! in_array($this->brand, ['zontes', 'morini'], true)) {
             return;
         }
 
@@ -610,13 +627,15 @@ new class extends Component
                                 </div>
                             </div>
                         @endif
-                        @if (in_array($brand, ['bera', 'zontes'], true))
+                        @if (in_array($brand, ['bera', 'zontes', 'morini'], true))
                             @foreach ([['firstValue', '1ero'], ['secondValue', '2do'], ['niv', 'NIV']] as [$field, $label])
                                 <div wire:key="product-{{ $brand }}-{{ $field }}">
                                     <label for="product-{{ $field }}" class="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">{{ $label }}</label>
-                                    <input id="product-{{ $field }}" @if ($brand === 'zontes') wire:model.live.debounce.300ms="{{ $field }}" @else wire:model="{{ $field }}" @endif type="text" maxlength="{{ $brand === 'zontes' ? match ($field) { 'firstValue' => 3, 'secondValue' => 5, default => 8 } : ($field === 'niv' ? 50 : 255) }}" @readonly($brand === 'zontes' && $field === 'niv') @disabled($formReadOnly) class="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-950 outline-none transition disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 focus:border-sky-400 focus:ring-4 focus:ring-sky-500/10 dark:border-white/10 dark:bg-slate-950/60 dark:text-white dark:disabled:bg-slate-950/30">
-                                    @if ($brand === 'zontes' && $field === 'niv')
+                                    <input id="product-{{ $field }}" @if (in_array($brand, ['zontes', 'morini'], true)) wire:model.live.debounce.300ms="{{ $field }}" @else wire:model="{{ $field }}" @endif type="text" maxlength="{{ in_array($brand, ['zontes', 'morini'], true) ? match ($field) { 'firstValue' => 3, 'secondValue' => 5, default => 8 } : ($field === 'niv' ? 50 : 255) }}" @readonly(in_array($brand, ['zontes', 'morini'], true) && $field === 'niv') @disabled($formReadOnly) class="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-950 outline-none transition disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 focus:border-sky-400 focus:ring-4 focus:ring-sky-500/10 dark:border-white/10 dark:bg-slate-950/60 dark:text-white dark:disabled:bg-slate-950/30">
+                                    @if (in_array($brand, ['zontes', 'morini'], true) && $field === 'niv')
                                         <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">Prefijo de 8 caracteres generado al combinar 1ero y 2do para identificar el modelo.</p>
+                                    @elseif ($brand === 'bera' && $field === 'niv' && $niv !== '' && ! preg_match('/^[A-HJ-NPR-Z0-9]{2}$/', $niv))
+                                        <p class="mt-2 text-sm text-amber-700 dark:text-amber-300">Revisa este código histórico: Bera utiliza dos caracteres. Puedes editar los demás datos y corregir el código antes de cargar seriales.</p>
                                     @endif
                                     @error($field) <p class="mt-2 text-sm text-rose-600 dark:text-rose-300">{{ $message }}</p> @enderror
                                 </div>

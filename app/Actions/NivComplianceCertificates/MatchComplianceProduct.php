@@ -2,9 +2,9 @@
 
 namespace App\Actions\NivComplianceCertificates;
 
+use App\Actions\Products\MatchProductSerial;
 use App\Models\Product;
 use Illuminate\Database\Eloquent\Collection;
-use Illuminate\Support\Str;
 
 class MatchComplianceProduct
 {
@@ -32,52 +32,18 @@ class MatchComplianceProduct
             return false;
         }
 
-        if (in_array($brand, ['bera', 'zontes'], true)) {
-            $code = $this->code($fields);
-            $productCode = Str::upper(trim((string) $product->niv));
-            if ($productCode === '' && $brand === 'zontes') {
-                $productCode = Str::upper(trim((string) $product->first_value).trim((string) $product->second_value));
-            }
-
-            return $code !== null && $productCode === $code;
-        }
-
-        $name = $this->descriptionKey($product->name);
-
-        return $name !== '' && in_array($name, [
-            $this->descriptionKey($fields['model'] ?? ''),
-            $this->descriptionKey($fields['series_version'] ?? ''),
-        ], true);
+        return app(MatchProductSerial::class)->handle($product, is_string($fields['serial_pattern'] ?? null) ? $fields['serial_pattern'] : '');
     }
 
     /** @param array<string, mixed> $fields */
     public function brand(array $fields): ?string
     {
-        return match ($this->descriptionKey($fields['brand'] ?? '')) {
-            'BERA' => 'bera',
-            'ZONTES' => 'zontes',
-            'MORINI', 'MOTOMORINI' => 'morini',
-            default => null,
-        };
+        return app(MatchProductSerial::class)->normalizeBrand(is_string($fields['brand'] ?? null) ? $fields['brand'] : '');
     }
 
     /** @param array<string, mixed> $fields */
     public function code(array $fields): ?string
     {
-        $serial = is_string($fields['serial_pattern'] ?? null) ? Str::upper(trim($fields['serial_pattern'])) : '';
-        if (! preg_match('/^[A-HJ-NPR-Z0-9]{17}$/', $serial)) {
-            return null;
-        }
-
-        return match ($this->brand($fields)) {
-            'zontes' => substr($serial, 0, 8),
-            'bera' => substr($serial, 3, 2),
-            default => null,
-        };
-    }
-
-    private function descriptionKey(mixed $value): string
-    {
-        return is_string($value) ? (string) preg_replace('/[^A-Z0-9]/', '', Str::upper(Str::ascii($value))) : '';
+        return app(MatchProductSerial::class)->code(is_string($fields['serial_pattern'] ?? null) ? $fields['serial_pattern'] : '', $this->brand($fields) ?? '');
     }
 }

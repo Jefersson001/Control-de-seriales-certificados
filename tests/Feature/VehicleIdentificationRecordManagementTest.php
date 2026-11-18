@@ -31,7 +31,10 @@ test('finalizing a motorcycle serial request automatically creates one related m
         'status' => MotorcycleSerialRequestStatus::Draft,
         'category' => $category,
     ]);
-    $serialRequest->lines()->first()->product->update(['category' => $category]);
+    $line = $serialRequest->lines()->first();
+    $line->update(['quantity' => 1]);
+    $line->product->update(['category' => $category, 'brand' => 'bera', 'niv' => 'C7']);
+    $line->serialEntries()->first()->update(['serial' => '8YZC7MCC3VD000001']);
 
     $this->actingAs($administrator);
 

@@ -519,6 +519,133 @@ test('a related product can be removed and deleting it preserves the certificate
     $this->assertModelExists($certificate);
 });
 
+test('Morini certificates create and identify products using their eight character prefix', function (string $model, string $serial) {
+    Storage::fake('local');
+    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+    $text = str_replace(['MARCA ZONTES', 'MODELO 150 X', 'LD3THK5BXV1000001'], ['MARCA MORINI', 'MODELO '.$model, $serial], complianceCertificateText());
+    $pdf = complianceCertificatePdf($text);
+    Livewire::test('niv-compliance-certificate-form')->set('category', 'importados')
+        ->set('pdfFile', UploadedFile::fake()->createWithContent('Constancia Morini.pdf', $pdf))->call('analyze')
+        ->assertSet('productMatchStatus', 'missing')->call('prepareProductCreation')->assertSet('newProductName', $model)
+        ->call('createRelatedProduct')->assertHasNoErrors()->call('save')->assertHasNoErrors();
+    $product = Product::query()->sole();
+    $certificate = NivComplianceCertificate::query()->sole();
+    expect($product)->brand->toBe('morini')->category->toBe('importados')->first_value->toBe('HL4')
+        ->second_value->toBe(substr($serial, 3, 5))->niv->toBe(substr($serial, 0, 8));
+    expect($certificate->product_id)->toBe($product->id);
+    Livewire::test('niv-compliance-certificate-form', ['certificateId' => $certificate->id])
+        ->set('pdfFile', UploadedFile::fake()->createWithContent('Constancia Morini.pdf', $pdf))->call('analyze')
+        ->assertSet('productMatchStatus', 'matched')->assertSet('productId', $product->id)->call('save')->assertHasNoErrors();
+    expect(Product::query()->count())->toBe(1);
+})->with([
+    ['ALLTRHIKE 450', 'HL4PMSABXVZ000001'], ['CALIBRO 700', 'HL4PKWAB3VZ000001'],
+    ['SEIEMMEZZO 650 SCR', 'HL4PMVBBXVZ000001'], ['SEIEMMEZZO 650 STR', 'HL4PMVBA0VZ000001'],
+    ['XCAPE 1200', 'HL4PU3AB2VZ000001'], ['XCAPE 650', 'HL4PMVAB8VZ000001'], ['XCAPE 700', 'HL4PMWAD9VZ000001'],
+]);
+
+test('Morini descriptions cannot override the SCR and STR variant code', function () {
+    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+    $product = Product::factory()->create(['name' => 'SEIEMMEZZO 650 SCR', 'category' => 'importados', 'brand' => 'morini', 'niv' => 'HL4PMVBA']);
+    $certificate = NivComplianceCertificate::factory()->create(['category' => 'importados', 'brand' => 'MORINI', 'model' => 'SEIEMMEZZO 650 SCR', 'serial_pattern' => 'HL4PMVBBXVZ000001']);
+    Livewire::test('niv-compliance-certificate-form', ['certificateId' => $certificate->id])->assertSet('productMatchStatus', 'missing')
+        ->set('productId', $product->id)->call('save')->assertHasErrors('productId');
+    expect($certificate->refresh()->product_id)->toBeNull();
+});
+
+test('Morini OCR uses focused readings to recover model series and manufacturer', function () {
+    $text = str_replace(['MARCA ZONTES', 'MODELO 150 X', 'LD3THK5BXV1000001'], ['MARCA MORIM', 'MODELO SEIEMMEZZO SCR', 'HL4PMVBBXVZ000001'], complianceCertificateText());
+    $result = app(ParseComplianceCertificate::class)->parse([['page' => 1, 'text' => $text, 'regions' => [
+        'vehicle_brand' => "MORINI\nMORIM", 'vehicle_model' => "I SEIEMMEZZO 6\nSEIEMMEZZO 6", 'vehicle_series' => "650 SCN\n650 SCR",
+    ]]]);
+    expect($result['fields'])->brand->toBe('MORINI')->model->toBe('SEIEMMEZZO 650 SCR')
+        ->series_version->toBe('650 SCR')->serial_pattern->toBe('HL4PMVBBXVZ000001');
+});
+
+test('a focused serial reading can correct a misread Morini sequence number', function () {
+    $text = str_replace(['MARCA ZONTES', 'LD3THK5BXV1000001'], ['MARCA MORINI', 'HL4PMWAD9VZ000003'], complianceCertificateText());
+    $result = app(ParseComplianceCertificate::class)->parse([['page' => 1, 'text' => $text, 'regions' => ['serial' => "HL4PMWAD9VZ000001\nHL4PMWAD9VZ000001"]]]);
+    expect($result['fields']['serial_pattern'])->toBe('HL4PMWAD9VZ000001');
+});
+
+test('conflicting Morini series readings are left empty for review', function () {
+    $text = str_replace(['MARCA ZONTES', 'MODELO 150 X', 'LD3THK5BXV1000001'], ['MARCA MORINI', 'MODELO XCAPE 650', 'HL4PMVAB8VZ000001'], complianceCertificateText());
+    $result = app(ParseComplianceCertificate::class)->parse([['page' => 1, 'text' => $text, 'regions' => ['vehicle_model' => 'XC APE 650', 'vehicle_series' => '655']]]);
+    expect($result['fields'])->model->toBe('XCAPE 650')->series_version->toBeNull();
+    expect($result['missing_fields'])->toContain('series_version');
+});
+
+test('correcting a preexisting Morini product category makes it recognizable without creating a duplicate', function () {
+    Storage::fake('local');
+    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+    $product = Product::factory()->create(['name' => 'CALIBRO 700', 'brand' => 'morini', 'category' => 'nacional', 'first_value' => 'HL4', 'second_value' => 'PKWAB', 'niv' => 'HL4PKWAB']);
+    $text = str_replace(['MARCA ZONTES', 'MODELO 150 X', 'LD3THK5BXV1000001'], ['MARCA MORINI', 'MODELO CALIBRO 700', 'HL4PKWAB3VZ000001'], complianceCertificateText());
+    $component = Livewire::test('niv-compliance-certificate-form')->set('category', 'importados')
+        ->set('pdfFile', UploadedFile::fake()->createWithContent('CALIBRO 700.pdf', complianceCertificatePdf($text)))
+        ->call('analyze')->assertSet('productMatchStatus', 'missing')->call('prepareProductCreation')
+        ->call('createRelatedProduct')->assertHasErrors('newProductName');
+    $product->update(['category' => 'importados']);
+    $component->call('detectProduct')->assertSet('productMatchStatus', 'matched')->assertSet('productId', $product->id)
+        ->call('createRelatedProduct')->call('save')->assertHasNoErrors();
+    expect(Product::query()->count())->toBe(1)
+        ->and(NivComplianceCertificate::query()->sole()->product_id)->toBe($product->id);
+});
+
+test('national Bera certificates match existing products by VIN positions four and five', function (string $model, string $serial, string $code, string $registeredName) {
+    Storage::fake('local');
+    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+    $product = Product::factory()->create(['name' => $registeredName, 'category' => 'nacional', 'brand' => 'bera', 'niv' => $code]);
+    Product::factory()->create(['category' => 'importados', 'brand' => 'bera', 'niv' => $code]);
+    Livewire::test('niv-compliance-certificate-form')
+        ->set('pdfFile', UploadedFile::fake()->createWithContent('Constancia nacional.pdf', complianceCertificatePdf(nationalComplianceCertificateText($model, $serial))))
+        ->call('analyze')->assertHasNoErrors()->assertSet('productId', $product->id)->assertSet('productMatchStatus', 'matched')
+        ->assertSee('Código del modelo (posiciones 4 y 5)')->call('save')->assertHasNoErrors();
+    expect(NivComplianceCertificate::query()->sole())->product_id->toBe($product->id)->category->toBe('nacional')
+        ->document_reference->toBe('IO VT R056 192')->brand->toBe('BERA')->observations->toBeNull();
+    expect(Product::query()->count())->toBe(2);
+})->with([
+    ['BR 150 SBR', '8YZWJMCA7VD000001', 'WJ', 'BR 150 SBR'],
+    ['BR 150 BRF', '8YZC7MCC3VD000001', 'C7', 'BR 150 BRF'],
+    ['BR 150', '8YZFUMCA8VD000001', 'FU', 'BR 150 SOCIALISTA'],
+]);
+
+test('a new Bera product created from a certificate fills both national identification characters', function (string $serial, string $first, string $second) {
+    Storage::fake('local');
+    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+    Livewire::test('niv-compliance-certificate-form')
+        ->set('pdfFile', UploadedFile::fake()->createWithContent('Constancia nacional.pdf', complianceCertificatePdf(nationalComplianceCertificateText('BR 150', $serial))))
+        ->call('analyze')->call('prepareProductCreation')->call('createRelatedProduct')->assertHasNoErrors()
+        ->call('save')->assertHasNoErrors();
+    $product = Product::query()->sole();
+    expect($product)->brand->toBe('bera')->category->toBe('nacional')->first_value->toBe($first)->second_value->toBe($second)->niv->toBe($first.$second);
+    expect(NivComplianceCertificate::query()->sole()->product_id)->toBe($product->id);
+})->with([['8YZWJMCA7VD000001', 'W', 'J'], ['8YZC7MCC3VD000001', 'C', '7'], ['8YZFUMCA8VD000001', 'F', 'U']]);
+
+test('national reference formats are extracted without taking text from the next line', function (string $reference, string $expected) {
+    $text = str_replace('IO VT R056 192', $reference, nationalComplianceCertificateText('BR 150', '8YZFUMCA8VD000001'));
+    $result = app(ParseComplianceCertificate::class)->parse([['page' => 1, 'text' => $text]]);
+    expect($result['fields']['document_reference'])->toBe($expected)
+        ->and($result['fields']['observations'])->toBeNull();
+})->with([['IO VT R056 192', 'IO VT R056 192'], ['10 VT R056 193', 'IO VT R056 193'], ['IO VT R056 194', 'IO VT R056 194'], ['IOCTR056 180 8', 'IOCTR056 180 8']]);
+
+test('focused Bera readings recover a truncated model and manufacturing years', function () {
+    $text = str_replace(['MODELO BR 150 BRF', '2026/2027'], ['MODELO BR', '2026/20>7'], nationalComplianceCertificateText('BR 150 BRF', '8YZC7MCC3VD000001'));
+    $result = app(ParseComplianceCertificate::class)->parse([['page' => 1, 'text' => $text, 'regions' => [
+        'vehicle_brand' => 'BERA', 'vehicle_model' => "BR 150 BRF\nBR 150 BRF", 'vehicle_series' => "H50\n150",
+        'vehicle_years' => '2026/2027 2027/2027',
+    ]]]);
+    expect($result['fields'])->model->toBe('BR 150 BRF')->series_version->toBe('150')
+        ->manufacturing_years->toBe('2026, 2027')->model_year->toBe(2027);
+});
+
+function nationalComplianceCertificateText(string $model, string $serial): string
+{
+    return str_replace(
+        ['N°28684', 'IO CT R056 180 8', 'MARCA ZONTES', 'MODELO 150 X', 'LD3THK5BXV1000001', 'PAIS ORIGEN CHINA', 'TIPO SCOOTER', 'OBSERVACIONES: N/A'],
+        ['N°30512', 'IO VT R056 192', 'MARCA BERA', 'MODELO '.$model, $serial, 'PAIS ORIGEN VENEZUELA', 'TIPO MOTOCICLETA', 'OBSERVACIONES:'],
+        complianceCertificateText(),
+    );
+}
+
 function complianceCertificateText(bool $is368 = false): string
 {
     $text = <<<'TEXT'

@@ -5,6 +5,7 @@ use App\Models\Dispatch;
 use App\UserPermission;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\Url;
@@ -102,7 +103,19 @@ new class extends Component
     {
         abort_unless(auth()->user()?->hasPermission(UserPermission::DeleteDispatches), 403);
 
-        Dispatch::query()->findOrFail($this->deletingDispatchId)->delete();
+        $deleted = DB::transaction(function (): bool {
+            $dispatch = Dispatch::query()->lockForUpdate()->findOrFail($this->deletingDispatchId);
+            if ($dispatch->status === DispatchStatus::Done) {
+                $this->addError('deleteDispatch', 'Un despacho finalizado conserva el historial de sus NIV y no se puede eliminar.');
+
+                return false;
+            }
+            $dispatch->delete();
+            return true;
+        });
+        if (! $deleted) {
+            return;
+        }
 
         $this->closeDeleteConfirmation();
         $this->resetPage();
@@ -188,6 +201,7 @@ new class extends Component
                     <p class="mt-3 leading-7 text-slate-600 dark:text-slate-300">
                         Se eliminará permanentemente <strong class="text-slate-950 dark:text-white">{{ $deletingDispatchName }}</strong>. Esta acción no se puede deshacer.
                     </p>
+                    @error('deleteDispatch') <p role="alert" class="mt-4 text-sm font-semibold text-rose-600 dark:text-rose-300">{{ $message }}</p> @enderror
                     <div class="mt-7 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                         <button wire:click="closeDeleteConfirmation" type="button" class="rounded-xl border border-slate-300 px-5 py-3 font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-white/15 dark:text-slate-200 dark:hover:bg-white/5">Cancelar</button>
                         <button wire:click="deleteDispatch" wire:loading.attr="disabled" wire:target="deleteDispatch" type="button" class="rounded-xl bg-rose-600 px-5 py-3 font-semibold text-white transition hover:bg-rose-700 disabled:cursor-wait disabled:opacity-60 dark:bg-rose-500 dark:hover:bg-rose-400">

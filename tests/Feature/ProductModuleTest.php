@@ -145,7 +145,7 @@ test('authorized users can create products', function () {
         ->set('description', 'Motocicleta de prueba')
         ->set('firstValue', 'Clase A')
         ->set('secondValue', 'Tipo B')
-        ->set('niv', 'NIV-PRODUCTO-001')
+        ->set('niv', 'AB')
         ->call('save')
         ->assertHasNoErrors()
         ->assertSee('Producto creado correctamente.');
@@ -157,7 +157,7 @@ test('authorized users can create products', function () {
     expect($product->brand)->toBe('bera');
     expect($product->first_value)->toBe('Clase A')
         ->and($product->second_value)->toBe('Tipo B')
-        ->and($product->niv)->toBe('NIV-PRODUCTO-001');
+        ->and($product->niv)->toBe('AB');
 });
 
 test('products can be registered with the available brands', function (string $category, string $brand) {
@@ -175,6 +175,8 @@ test('products can be registered with the available brands', function (string $c
 
     if ($brand === 'zontes') {
         $component->set('secondValue', 'THK5B');
+    } elseif ($brand === 'morini') {
+        $component->set('secondValue', 'PMSAB');
     }
 
     $component->call('save')->assertHasNoErrors();
@@ -196,6 +198,8 @@ test('the product brand can be loaded changed and reset', function () {
     Livewire::test('product-manager', ['formOnly' => true, 'productId' => $product->id])
         ->assertSet('brand', 'zontes')
         ->set('brand', 'morini')
+        ->set('firstValue', 'HL4')
+        ->set('secondValue', 'PMSAB')
         ->call('save')
         ->assertHasNoErrors();
 
@@ -252,7 +256,7 @@ test('the brand migration preserves existing national products', function () {
         ->category->toBe('nacional');
 });
 
-test('product fields follow the requested order and codes are visible for bera and zontes', function (string $category, string $brand) {
+test('product fields follow the requested order and codes are visible for every supported brand', function (string $category, string $brand) {
     $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
 
     $component = Livewire::test('product-manager', ['formOnly' => true])
@@ -261,7 +265,7 @@ test('product fields follow the requested order and codes are visible for bera a
         ->assertSeeHtmlInOrder(['for="product-brand"', 'for="product-description"', 'for="product-category"']);
 
     foreach (['firstValue', 'secondValue', 'niv'] as $field) {
-        if (in_array($brand, ['bera', 'zontes'], true)) {
+        if (in_array($brand, ['bera', 'zontes', 'morini'], true)) {
             $component->assertSee('id="product-'.$field.'"', false);
         } else {
             $component->assertDontSee('id="product-'.$field.'"', false);
@@ -270,7 +274,7 @@ test('product fields follow the requested order and codes are visible for bera a
 
     $component->set('brand', 'bera')->assertSee('id="product-niv"', false)
         ->set('brand', 'zontes')->assertSee('id="product-niv"', false)
-        ->set('brand', 'morini')->assertDontSee('id="product-niv"', false);
+        ->set('brand', 'morini')->assertSee('id="product-niv"', false);
 })->with(['nacional', 'importados'])->with(['bera', 'zontes', 'morini']);
 
 test('the product list shows brand description and category without the bera fields', function () {
@@ -289,7 +293,7 @@ test('the product list shows brand description and category without the bera fie
         ->assertDontSee('>NIV</th>', false);
 });
 
-test('switching to morini preserves existing bera fields', function () {
+test('switching to morini with invalid codes preserves the stored bera product', function () {
     $product = Product::factory()->create([
         'brand' => 'bera', 'first_value' => 'Primero', 'second_value' => 'Segundo', 'niv' => 'NIV-EXISTENTE',
     ]);
@@ -298,9 +302,10 @@ test('switching to morini preserves existing bera fields', function () {
     Livewire::test('product-manager', ['formOnly' => true, 'productId' => $product->id])
         ->set('brand', 'morini')
         ->call('save')
-        ->assertHasNoErrors();
+        ->assertHasErrors(['firstValue', 'secondValue']);
 
     expect($product->refresh())
+        ->brand->toBe('bera')
         ->first_value->toBe('Primero')
         ->second_value->toBe('Segundo')
         ->niv->toBe('NIV-EXISTENTE');
@@ -391,6 +396,53 @@ test('zontes requires a valid manufacturer and five character model code', funct
     ['LD3', 'THO5B', 'secondValue'],
     ['LD3', 'THQ5B', 'secondValue'],
 ]);
+
+test('Morini products reuse the manufacturer and five character model code', function (string $model, string $code) {
+    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+    Livewire::test('product-manager', ['formOnly' => true])
+        ->set('description', $model)->set('brand', 'morini')->set('category', 'importados')
+        ->assertSet('firstValue', 'HL4')->assertSee('id="product-firstValue"', false)->assertSee('id="product-secondValue"', false)
+        ->set('secondValue', ' '.strtolower($code).' ')->assertSet('niv', 'HL4'.$code)
+        ->set('niv', 'VALOR MANIPULADO')->call('save')->assertHasNoErrors();
+    expect(Product::query()->sole())->brand->toBe('morini')->category->toBe('importados')
+        ->first_value->toBe('HL4')->second_value->toBe($code)->niv->toBe('HL4'.$code);
+})->with([
+    ['ALLTRHIKE 450', 'PMSAB'], ['CALIBRO 700', 'PKWAB'], ['SEIEMMEZZO 650 SCR', 'PMVBB'],
+    ['SEIEMMEZZO 650 STR', 'PMVBA'], ['XCAPE 1200', 'PU3AB'], ['XCAPE 650', 'PMVAB'], ['XCAPE 700', 'PMWAD'],
+]);
+
+test('Morini rejects invalid manufacturer and model codes', function (string $first, string $second, string $field) {
+    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+    Livewire::test('product-manager', ['formOnly' => true])->set('description', 'Morini de prueba')->set('brand', 'morini')
+        ->set('firstValue', $first)->set('secondValue', $second)->call('save')->assertHasErrors($field);
+    expect(Product::query()->count())->toBe(0);
+})->with([
+    ['LD3', 'PMSAB', 'firstValue'], ['', 'PMSAB', 'firstValue'], ['HL4', '', 'secondValue'],
+    ['HL4', 'PMSA', 'secondValue'], ['HL4', 'PMSABB', 'secondValue'], ['HL4', 'PMIAB', 'secondValue'],
+]);
+
+test('changing between imported brands updates the manufacturer prefix', function () {
+    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+    Livewire::test('product-manager', ['formOnly' => true])->set('brand', 'zontes')->set('secondValue', 'THK5B')
+        ->set('brand', 'morini')->assertSet('firstValue', 'HL4')->assertSet('niv', 'HL4THK5B')
+        ->set('secondValue', 'PMSAB')->set('brand', 'zontes')->assertSet('firstValue', 'LD3')->assertSet('niv', 'LD3PMSAB');
+});
+
+test('new imported brands default to the imported category', function (string $brand, string $code) {
+    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+    Livewire::test('product-manager', ['formOnly' => true])->assertSet('category', 'nacional')
+        ->set('description', 'Producto importado '.$brand)->set('brand', $brand)->assertSet('category', 'importados')
+        ->set('secondValue', $code)->call('save')->assertHasNoErrors();
+    expect(Product::query()->sole()->category)->toBe('importados');
+})->with([['morini', 'PKWAB'], ['zontes', 'THK5B']]);
+
+test('loading and editing an existing product does not automatically change its category', function () {
+    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+    $product = Product::factory()->create(['category' => 'nacional', 'brand' => 'morini', 'first_value' => 'HL4', 'second_value' => 'PKWAB', 'niv' => 'HL4PKWAB']);
+    Livewire::test('product-manager', ['formOnly' => true, 'productId' => $product->id])->assertSet('category', 'nacional')
+        ->set('brand', 'morini')->assertSet('category', 'nacional');
+    expect($product->refresh()->category)->toBe('nacional');
+});
 
 test('the product form defaults to the national category', function () {
     $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));

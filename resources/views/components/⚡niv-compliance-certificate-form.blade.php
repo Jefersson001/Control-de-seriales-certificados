@@ -160,7 +160,12 @@ new class extends Component
         ]);
         $matcher = app(MatchComplianceProduct::class);
         $brand = $matcher->brand($this->fields);
-        if ($brand === null || ($brand === 'zontes' && ! str_starts_with((string) $matcher->code($this->fields), 'LD3'))) {
+        $manufacturer = match ($brand) {
+            'zontes' => 'LD3',
+            'morini' => 'HL4',
+            default => null,
+        };
+        if ($brand === null || ($manufacturer !== null && ! str_starts_with((string) $matcher->code($this->fields), $manufacturer))) {
             $this->addError('productId', 'Revisa la marca y el serial patrón antes de crear el producto.');
 
             return;
@@ -180,8 +185,8 @@ new class extends Component
             'name' => $this->newProductName,
             'category' => $this->category,
             'brand' => $brand,
-            'first_value' => $brand === 'zontes' ? substr((string) $code, 0, 3) : null,
-            'second_value' => $brand === 'zontes' ? substr((string) $code, 3, 5) : null,
+            'first_value' => $brand === 'bera' ? substr((string) $code, 0, 1) : substr((string) $code, 0, 3),
+            'second_value' => $brand === 'bera' ? substr((string) $code, 1, 1) : substr((string) $code, 3, 5),
             'niv' => $code,
         ]);
         $this->productId = $product->id;
@@ -491,7 +496,7 @@ new class extends Component
                                         <input id="compliance-{{ $key }}" @if (in_array($key, ['brand', 'model', 'series_version', 'serial_pattern'], true)) wire:model.blur="fields.{{ $key }}" @else wire:model="fields.{{ $key }}" @endif type="{{ str_ends_with($key, '_on') ? 'date' : ($key === 'model_year' ? 'number' : 'text') }}" @disabled(! $this->canEdit()) class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 disabled:opacity-60 dark:border-white/10 dark:bg-slate-950/60">
                                     @endif
                                     @if ($key === 'serial_pattern' && strlen($fields['serial_pattern'] ?? '') === 17)
-                                        <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">Prefijo del modelo: <span class="font-mono font-semibold">{{ substr($fields['serial_pattern'], 0, 8) }}</span></p>
+                                        <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">Código del modelo{{ app(MatchComplianceProduct::class)->brand($fields) === 'bera' ? ' (posiciones 4 y 5)' : '' }}: <span class="font-mono font-semibold">{{ app(MatchComplianceProduct::class)->code($fields) ?? 'Pendiente de reconocer la marca' }}</span></p>
                                     @endif
                                     @error('fields.'.$key) <p class="mt-2 text-sm text-rose-600 dark:text-rose-300">{{ $message }}</p> @enderror
                                 </div>

@@ -85,7 +85,7 @@ try {
                     foreach ($word in $line.Words) {
                         $center = $word.BoundingRect.Y + $start + $word.BoundingRect.Height / 2
                         if ($center -ge $coreStart -and $center -lt $coreEnd) {
-                            $words.Add(@{ text = $word.Text; x = $word.BoundingRect.X; y = $center; height = $word.BoundingRect.Height })
+                            $words.Add(@{ text = $word.Text; x = $word.BoundingRect.X; y = $center; width = $word.BoundingRect.Width; height = $word.BoundingRect.Height })
                         }
                     }
                 }
@@ -103,11 +103,34 @@ try {
             }
             $text = ($rows | ForEach-Object { ($_.words | Sort-Object { $_.x } | ForEach-Object { $_.text }) -join ' ' }) -join "`n"
             $regions = @{}
-            foreach ($region in @(
+            $regionDefinitions = @(
                 @{ name = 'identification'; x = 0.06; y = 0.28; width = 0.91; height = 0.065 },
                 @{ name = 'issued'; x = 0.06; y = 0.68; width = 0.91; height = 0.065 },
-                @{ name = 'validity'; x = 0.06; y = 0.53; width = 0.91; height = 0.075 }
-            )) {
+                @{ name = 'validity'; x = 0.06; y = 0.53; width = 0.91; height = 0.075 },
+                @{ name = 'header'; x = 0.06; y = 0.10; width = 0.91; height = 0.075 }
+            )
+            $modelLabel = $words | Where-Object { $_.text -match '^MODELO[:.]?$' -and $_.x -lt $decoder.PixelWidth * 0.30 -and $_.y -gt $decoder.PixelHeight * 0.35 -and $_.y -lt $decoder.PixelHeight * 0.60 } | Select-Object -First 1
+            if ($null -ne $modelLabel) {
+                $brandLabel = $words | Where-Object { $_.text -match '^MARCA[:.]?$' -and $_.x -lt $decoder.PixelWidth * 0.30 -and $_.y -lt $modelLabel.y -and ($modelLabel.y - $_.y) -lt $modelLabel.height * 3 } | Select-Object -Last 1
+                $step = $modelLabel.height * 1.65
+                if ($null -ne $brandLabel) { $step = $modelLabel.y - $brandLabel.y }
+                $vehicleFields = @(@{ name = 'vehicle_brand'; offset = -1 }, @{ name = 'vehicle_model'; offset = 0 }, @{ name = 'vehicle_series'; offset = 1 })
+                if ($text -match '\bBERA\b') { $vehicleFields += @{ name = 'vehicle_years'; offset = 2 } }
+                foreach ($field in $vehicleFields) {
+                    $regionDefinitions += @{ name = $field.name; x = 0.267; y = ($modelLabel.y + $field.offset * $step - $step * 0.43) / $decoder.PixelHeight; width = 0.255; height = $step * 0.86 / $decoder.PixelHeight }
+                }
+            }
+            $serialLabel = $words | Where-Object { $_.text -match '^PATR' -and $_.y -gt $decoder.PixelHeight * 0.25 -and $_.y -lt $decoder.PixelHeight * 0.43 } | Select-Object -First 1
+            if ($null -ne $serialLabel) {
+                $serialX = ($serialLabel.x + $serialLabel.width) / $decoder.PixelWidth
+                $regionDefinitions += @{ name = 'serial'; x = $serialX; y = ($serialLabel.y - $serialLabel.height * 0.85) / $decoder.PixelHeight; width = [Math]::Min(0.30, 0.97 - $serialX); height = $serialLabel.height * 1.7 / $decoder.PixelHeight }
+            } else {
+                $serialWord = $words | Where-Object { $_.text.Trim(':;,.') -match '^[A-Z0-9]{8}[0-9XO][A-Z0-9]{2}[0-9OIL]{6}$' -and $_.x -gt $decoder.PixelWidth * 0.30 -and $_.y -gt $decoder.PixelHeight * 0.25 -and $_.y -lt $decoder.PixelHeight * 0.43 } | Select-Object -First 1
+                if ($null -ne $serialWord) {
+                    $regionDefinitions += @{ name = 'serial'; x = [Math]::Max(0.0, ($serialWord.x - 15) / $decoder.PixelWidth); y = ($serialWord.y - $serialWord.height * 0.85) / $decoder.PixelHeight; width = ($serialWord.width + 30) / $decoder.PixelWidth; height = $serialWord.height * 1.7 / $decoder.PixelHeight }
+                }
+            }
+            foreach ($region in $regionDefinitions) {
                 $bounds = [Windows.Graphics.Imaging.BitmapBounds]::new()
                 $bounds.X = [uint32]($decoder.PixelWidth * $region.x)
                 $bounds.Y = [uint32]($decoder.PixelHeight * $region.y)

@@ -2,6 +2,7 @@
 
 namespace App\Actions\Certificates;
 
+use App\Actions\Products\MatchProductSerial;
 use App\Models\MsCertificado;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -526,6 +527,7 @@ class ImportCertificatesFromPdf
                 fn (array $record): array => [
                     ...$record,
                     'issued_on' => $issuedOn,
+                    'category' => app(MatchProductSerial::class)->category($record['niv'], $record['marca']),
                     'created_at' => $timestamp,
                     'updated_at' => $timestamp,
                 ],

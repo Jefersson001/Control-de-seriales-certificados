@@ -2,7 +2,10 @@
 
 namespace App\Actions\Dispatches;
 
+use App\Actions\Products\MatchProductSerial;
 use App\CertificateStatus;
+use App\DispatchStatus;
+use App\Models\DispatchUncertifiedLine;
 use App\Models\MsCertificado;
 use App\Models\Product;
 use Illuminate\Support\Str;
@@ -50,24 +53,34 @@ class ImportDispatchPdf
                 ->get(['id', 'niv', 'marca', 'modelo', 'codigo', 'status']);
 
             foreach ($found as $certificado) {
-                $foundByNiv[$certificado->niv] = $certificado->status->value;
+                if (($foundByNiv[$certificado->niv] ?? null) !== CertificateStatus::Dispatched->value) {
+                    $foundByNiv[$certificado->niv] = $certificado->status->value;
+                }
             }
 
             $records->push(...$found
-                ->where('status', CertificateStatus::PendingDispatch)
+                ->whereIn('status', [CertificateStatus::PendingDispatch, CertificateStatus::Returned])
                 ->all());
+        }
+        $records = $records->reject(fn (MsCertificado $record): bool => ($foundByNiv[$record->niv] ?? null) === CertificateStatus::Dispatched->value);
+        if ($records->groupBy('niv')->contains(fn ($group): bool => $group->count() > 1)) {
+            throw new RuntimeException('Hay NIV repetidos en el maestro. Revisa los duplicados antes de cargar el despacho.');
         }
 
         $notFound = array_values(array_filter(
             $nivList,
             fn (string $niv): bool => ! array_key_exists($niv, $foundByNiv),
         ));
+        $previouslyUncertified = DispatchUncertifiedLine::query()->whereIn('niv', $notFound)
+            ->whereHas('dispatch', fn ($query) => $query->where('status', DispatchStatus::Done))->pluck('niv')->all();
+        $notFound = array_values(array_diff($notFound, $previouslyUncertified));
         $notFoundRecords = $this->buildNotFoundRecords($notFound);
         $alreadyDispatched = array_values(array_filter(
             $nivList,
             fn (string $niv): bool => array_key_exists($niv, $foundByNiv)
-                && $foundByNiv[$niv] !== CertificateStatus::PendingDispatch->value,
+                && ! in_array($foundByNiv[$niv], [CertificateStatus::PendingDispatch->value, CertificateStatus::Returned->value], true),
         ));
+        $alreadyDispatched = array_values(array_unique([...$alreadyDispatched, ...$previouslyUncertified]));
 
         if ($nivList === []) {
             throw new RuntimeException('No se encontraron seriales de 17 caracteres en el PDF.');
@@ -89,20 +102,20 @@ class ImportDispatchPdf
      */
     private function buildNotFoundRecords(array $nivs): array
     {
-        $productCodes = collect($nivs)
-            ->map(fn (string $niv): string => Str::upper(Str::substr($niv, 3, 2)))
-            ->unique()
-            ->values();
-        $productsByNiv = Product::query()
+        $matcher = app(MatchProductSerial::class);
+        $products = Product::query()
             ->whereNotNull('niv')
             ->orderBy('id')
-            ->get(['id', 'name', 'first_value', 'second_value', 'niv', 'year'])
-            ->filter(fn (Product $product): bool => $productCodes->contains(Str::upper(trim((string) $product->niv))))
-            ->groupBy(fn (Product $product): string => Str::upper(trim((string) $product->niv)));
+            ->get(['id', 'name', 'brand', 'category', 'first_value', 'second_value', 'niv', 'year']);
 
-        return collect($nivs)->map(function (string $niv) use ($productsByNiv): array {
-            $productCode = Str::upper(Str::substr($niv, 3, 2));
-            $product = $productsByNiv->get($productCode)?->first();
+        return array_values(collect($nivs)->map(function (string $niv) use ($products, $matcher): array {
+            $brand = $matcher->brand($niv);
+            $productCode = $matcher->code($niv, $brand ?? 'bera') ?? substr($niv, 0, 8);
+            $matches = $products->filter(fn (Product $product): bool => $brand !== null && $product->category === $matcher->category($niv) && $matcher->handle($product, $niv));
+            if ($matches->count() > 1) {
+                throw new RuntimeException("El NIV {$niv} coincide con varios productos. Revisa sus códigos antes de cargar el despacho.");
+            }
+            $product = $matches->first();
 
             return [
                 'niv' => $niv,
@@ -113,7 +126,7 @@ class ImportDispatchPdf
                 'product_niv' => $productCode,
                 'year' => $product?->year,
             ];
-        })->all();
+        })->all());
     }
 
     private function extractDispatchName(string $text): ?string

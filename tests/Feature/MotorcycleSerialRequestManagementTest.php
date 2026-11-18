@@ -310,7 +310,7 @@ test('authorized users can edit the product and finalize the request', function 
         ],
     ]);
     $originalProduct = Product::factory()->create();
-    $newProduct = Product::factory()->create();
+    $newProduct = Product::factory()->create(['brand' => 'bera', 'niv' => 'C7']);
     $serialRequest = MotorcycleSerialRequest::factory()->create(['status' => MotorcycleSerialRequestStatus::Draft]);
     $serialRequest->lines()->first()->update(['product_id' => $originalProduct->id]);
 
@@ -318,8 +318,8 @@ test('authorized users can edit the product and finalize the request', function 
 
     Livewire::test('motorcycle-serial-request-form', ['requestId' => $serialRequest->id])
         ->set('lines.0.product_id', $newProduct->id)
-        ->set('lines.0.quantity', 40)
-        ->set('lines.0.serials', 'SERIAL-NUEVO')
+        ->set('lines.0.quantity', 1)
+        ->set('lines.0.serials', '8YZC7MCC3VD000001')
         ->assertSee('Finalizar')
         ->call('openFinalizeConfirmation')
         ->assertSet('showFinalizeConfirmation', true)
@@ -330,7 +330,7 @@ test('authorized users can edit the product and finalize the request', function 
 
     expect($serialRequest->refresh()->status)->toBe(MotorcycleSerialRequestStatus::Done)
         ->and($serialRequest->lines()->first()->product_id)->toBe($newProduct->id)
-        ->and($serialRequest->lines()->first()->quantity)->toBe(40);
+        ->and($serialRequest->lines()->first()->quantity)->toBe(1);
 });
 
 test('request quantity must be a positive integer', function () {
@@ -565,6 +565,34 @@ test('zontes imports distinguish all three prefixes across multiple workbooks', 
         ->assertHasNoErrors();
 
     expect(MotorcycleSerialRequest::query()->sole()->lines()->count())->toBe(3);
+});
+
+test('Morini serials distinguish all seven models alongside Zontes and respect category', function () {
+    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+    $serials = ['HL4PMSABXVZ000001', 'HL4PKWAB3VZ000001', 'HL4PMVBBXVZ000001', 'HL4PMVBA0VZ000001', 'HL4PU3AB2VZ000001', 'HL4PMVAB8VZ000001', 'HL4PMWAD9VZ000001'];
+    $products = collect($serials)->map(fn (string $serial) => Product::factory()->create(['brand' => 'morini', 'category' => 'importados', 'niv' => substr($serial, 0, 8)]));
+    $zontes = Product::factory()->create(['brand' => 'zontes', 'category' => 'importados', 'niv' => 'LD3THK5B']);
+    Product::factory()->create(['brand' => 'morini', 'category' => 'nacional', 'niv' => 'HL4PMVBB']);
+    $path = createMotorcycleSerialWorkbook(array_map(fn (string $serial): array => [strtolower($serial)], [...$serials, $serials[0], 'LD3THK5BXV1000001', 'HL4PMSACXVZ000001']));
+    $upload = UploadedFile::fake()->createWithContent('Morini y Zontes.xlsx', file_get_contents($path));
+    unlink($path);
+    $component = Livewire::test('motorcycle-serial-request-form')->set('category', 'importados')->set('serialWorkbooks', [$upload])
+        ->call('importSerialWorkbook')->assertHasNoErrors()->assertCount('lines', 8);
+    foreach ($products as $index => $product) {
+        $component->assertSet('lines.'.$index.'.product_id', $product->id)->assertSet('lines.'.$index.'.quantity', 1);
+    }
+    $component->assertSet('lines.7.product_id', $zontes->id)->call('save')->assertHasNoErrors();
+    expect(MotorcycleSerialRequest::query()->sole()->lines()->count())->toBe(8);
+});
+
+test('ambiguous Morini prefixes cannot add serial lines', function () {
+    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]));
+    Product::factory()->count(2)->create(['brand' => 'morini', 'category' => 'importados', 'niv' => 'HL4PMVBB']);
+    $path = createMotorcycleSerialWorkbook([['HL4PMVBBXVZ000001']]);
+    $upload = UploadedFile::fake()->createWithContent('Morini.xlsx', file_get_contents($path));
+    unlink($path);
+    Livewire::test('motorcycle-serial-request-form')->set('category', 'importados')->set('serialWorkbooks', [$upload])
+        ->call('importSerialWorkbook')->assertHasErrors('serialWorkbooks')->assertSet('lines', [['product_id' => null, 'quantity' => 1, 'serials' => '']]);
 });
 
 test('imports without matches in the selected category leave existing lines untouched', function () {

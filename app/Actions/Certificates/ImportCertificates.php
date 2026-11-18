@@ -2,6 +2,7 @@
 
 namespace App\Actions\Certificates;
 
+use App\Actions\Products\MatchProductSerial;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -66,7 +67,7 @@ class ImportCertificates
                                     'row' => $rowNumber,
                                     'reason' => implode(' ', $mappedRow['reasons']),
                                     'values' => array_map(
-                                        fn (mixed $value): string => Str::of((string) $value)->trim()->value(),
+                                        fn (mixed $value): string => $this->spreadsheetValue($value),
                                         array_pad(array_slice($values, 0, 8), 8, null),
                                     ),
                                 ];
@@ -135,11 +136,12 @@ class ImportCertificates
     {
         $values = array_pad(array_slice($values, 0, 8), 8, null);
         $stringValues = array_map(
-            fn (mixed $value): string => Str::of((string) $value)->trim()->value(),
+            fn (mixed $value): string => $this->spreadsheetValue($value),
             $values,
         );
 
         [$no, $marca, $modelo, $tipo, $fabricacion, $anio, $niv, $codigo] = $stringValues;
+        $niv = Str::upper($niv);
         $reasons = [];
         $requiredFields = [
             'NO' => $no,
@@ -187,6 +189,7 @@ class ImportCertificates
 
         return [
             'record' => [
+                'category' => app(MatchProductSerial::class)->category($niv, $marca),
                 'no' => $no,
                 'marca' => $marca,
                 'modelo' => $modelo,
@@ -200,5 +203,10 @@ class ImportCertificates
             ],
             'reasons' => [],
         ];
+    }
+
+    private function spreadsheetValue(mixed $value): string
+    {
+        return is_scalar($value) || $value instanceof \Stringable ? trim((string) $value) : '';
     }
 }

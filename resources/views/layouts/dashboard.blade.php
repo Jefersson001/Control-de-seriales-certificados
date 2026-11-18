@@ -8,10 +8,19 @@
         <title>@yield('title', 'Panel') | {{ config('app.name') }}</title>
 
         <script>
-            const selectedTheme = localStorage.getItem('theme');
-            const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            (() => {
+                let selectedTheme = null;
+                const desktopSidebar = window.matchMedia('(min-width: 1024px)').matches;
+                let sidebarPreference = null;
+                try {
+                    selectedTheme = localStorage.getItem('theme');
+                    sidebarPreference = localStorage.getItem(desktopSidebar ? 'dashboard.sidebar.desktop' : 'dashboard.sidebar.mobile');
+                } catch {}
+                const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
 
-            document.documentElement.classList.toggle('dark', selectedTheme === 'dark' || (! selectedTheme && prefersDark));
+                document.documentElement.classList.toggle('dark', selectedTheme === 'dark' || (! selectedTheme && prefersDark));
+                document.documentElement.dataset.sidebarState = (sidebarPreference === null ? desktopSidebar : sidebarPreference === 'open') ? 'open' : 'closed';
+            })();
         </script>
 
         @vite(['resources/css/app.css', 'resources/js/app.js'])

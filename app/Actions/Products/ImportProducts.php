@@ -95,7 +95,7 @@ class ImportProducts
     }
 
     /** @param array<int, mixed> $values
-     *  @return array{name: string, first_value: string|null, second_value: string|null, niv: string|null, year: int|null, created_at: CarbonImmutable, updated_at: CarbonImmutable}|null
+     * @return array{name: string, first_value: string|null, second_value: string|null, niv: string|null, year: int|null, created_at: CarbonImmutable, updated_at: CarbonImmutable}|null
      */
     private function mapRow(array $values): ?array
     {
@@ -104,6 +104,7 @@ class ImportProducts
             array_pad(array_slice($values, 0, 5), 5, null),
         );
         [$description, $firstValue, $secondValue, $niv, $year] = $values;
+        $niv = Str::upper($niv);
 
         if ($description === '' || Str::length($description) > 255) {
             return null;
@@ -116,8 +117,13 @@ class ImportProducts
         if (Str::length($firstValue) > 255 || Str::length($secondValue) > 255 || Str::length($niv) > 50) {
             return null;
         }
+        if ($niv !== '' && ! preg_match('/^(?:[A-HJ-NPR-Z0-9]{2}|(?:LD3|HL4)[A-HJ-NPR-Z0-9]{5})$/', $niv)) {
+            return null;
+        }
 
         return [
+            'brand' => app(MatchProductSerial::class)->brand($niv) ?? 'bera',
+            'category' => app(MatchProductSerial::class)->category($niv),
             'name' => $description,
             'first_value' => $firstValue !== '' ? $firstValue : null,
             'second_value' => $secondValue !== '' ? $secondValue : null,

@@ -30,16 +30,18 @@ class ParseComplianceCertificate
 
         $erratum = collect($normalized)->first(fn (string $page): bool => str_contains($page, 'FE DE ERRATA'));
         $original = collect($normalized)->first(fn (string $page): bool => ! str_contains($page, 'FE DE ERRATA')) ?? $normalized[0];
+        $originalIndex = array_search($original, $normalized, true);
+        $regions = $pages[$originalIndex]['regions'] ?? [];
         $fields = array_fill_keys(array_keys(NivComplianceCertificate::fieldLabels()), null);
         $fields['has_erratum'] = $erratum !== null;
         $fields['certificate_number'] = $this->match('/^N[O0°º?]*\s*(\d{3,})\b/mu', $original);
-        $reference = $this->match('/\b([I1][O0]\s*CT\s*R\s*\d+\s+\d+\s+\d+)\b/u', $original);
+        $reference = $this->match('/\b([I1][O0][ \t]*(?:CT|VT)[ \t]*R[ \t]*\d+[ \t]+\d+(?:[ \t]+\d+)?)\b/u', $original);
         $fields['document_reference'] = $reference === null ? null : preg_replace('/^[I1][O0]/', 'IO', $reference);
-        $company = $this->match('/EMPRESA\s*:\s*(.+?)\s+IDENTIFICADA\b/su', $original);
+        $company = $this->match('/EMPRESA\s*:\s*(.{1,255}?)\s+IDENTIFICADA\b/su', $original);
         $fields['company_name'] = $company === null ? null : preg_replace('/\s+/', ' ', $company);
         $companySection = $this->match('/EMPRESA\s*:\s*(.{0,500})/su', $original) ?? ($erratum ?? $original);
         $erratumCompany = str_contains($erratum ?? '', 'CIUDADANO') ? Str::after($erratum, 'CIUDADANO') : '';
-        foreach ([$companySection, $erratumCompany] as $section) {
+        foreach ([$companySection, $this->normalize($regions['identification'] ?? ''), $erratumCompany] as $section) {
             if (preg_match('/\b([JVEG])[.,\s-]*(\d{8})\s*-\s*(\d)\b/u', $section, $rif)) {
                 $fields['company_rif'] = "{$rif[1]}-{$rif[2]}-{$rif[3]}";
 
@@ -51,6 +53,27 @@ class ParseComplianceCertificate
         $fields['brand'] = $this->field($original, 'MARCA', 'USO');
         $fields['model'] = $this->field($original, 'MODELO', 'CLASE');
         $fields['series_version'] = $this->field($original, 'SERIE\s*\/\s*VERSION', 'TIPO');
+        if ($fields['brand'] === 'BERA' || preg_match('/\bBERA\b/', $this->normalize($regions['vehicle_brand'] ?? ''))) {
+            $fields['brand'] = 'BERA';
+            $fields['model'] = $this->regionValue($regions['vehicle_model'] ?? '') ?? $fields['model'];
+            $fields['series_version'] = $this->regionValue($regions['vehicle_series'] ?? '', $fields['model']) ?? $fields['series_version'];
+        }
+        if (str_starts_with($fields['serial_pattern'] ?? '', 'HL4') || preg_match('/\bMORINI\b/', $this->normalize($regions['vehicle_brand'] ?? ''))) {
+            $fields['brand'] = 'MORINI';
+            $model = $this->regionValue($regions['vehicle_model'] ?? '') ?? $fields['model'];
+            $series = $this->regionValue($regions['vehicle_series'] ?? '', $fields['model']) ?? $fields['series_version'];
+            if ($model !== null && $fields['model'] !== null && str_replace(' ', '', $model) === str_replace(' ', '', $fields['model'])) {
+                $model = $fields['model'];
+            }
+            if (preg_match('/^(.+?)\s+(\d+)$/', $model ?? '', $modelParts) && preg_match('/^(\d{2,4})(?:\s+[A-Z]{2,5})?$/', $series ?? '', $seriesParts) && str_starts_with($seriesParts[1], $modelParts[2])) {
+                $model = $modelParts[1].' '.$series;
+            }
+            if (preg_match('/\b(\d{2,4})\b/', $model ?? '', $modelCapacity) && preg_match('/^(\d{2,4})\b/', $series ?? '', $seriesCapacity) && $modelCapacity[1] !== $seriesCapacity[1]) {
+                $series = null;
+            }
+            $fields['model'] = $model;
+            $fields['series_version'] = $series;
+        }
         $fields['country_of_origin'] = $this->field($original, 'PAIS\s+(?:DE\s+)?ORIGEN', 'IIF|IIM|IFE|IIE');
         $fields['vehicle_use'] = $this->match('/\bUSO\s*[:\-]?\s*([A-Z]+)\b/u', $original);
         $fields['vehicle_class'] = $this->match('/\bCLASE\s*[:\-]?\s*([A-Z]+)\b/u', $original);
@@ -59,9 +82,12 @@ class ParseComplianceCertificate
         if (preg_match('/\bIIF[^\n]{0,25}?\bN[\/I]A\b/u', $text)) {
             $fields['iim'] = 'N/A';
         }
-        $fields['observations'] = $this->match('/^OBSERVACIONES\s*:\s*([^\n]+)/mu', $original);
+        $observations = $this->match('/^OBSERVACIONES[ \t]*:[ \t]*([^\n]*)/mu', $original);
+        $fields['observations'] = $observations === '' ? null : $observations;
         if (preg_match_all('/\b(20\d{2})\s*\/\s*(20\d{2})\b/u', $text, $years, PREG_SET_ORDER)) {
-            $fields['manufacturing_years'] = implode(', ', array_unique(array_column($years, 1)));
+            $manufacturingYears = array_unique(array_column($years, 1));
+            sort($manufacturingYears, SORT_NUMERIC);
+            $fields['manufacturing_years'] = implode(', ', $manufacturingYears);
             $modelYears = array_unique(array_column($years, 2));
             $fields['model_year'] = count($modelYears) === 1 ? (int) reset($modelYears) : null;
         }
@@ -141,6 +167,31 @@ class ParseComplianceCertificate
         arsort($counts);
 
         return array_key_first($counts);
+    }
+
+    private function regionValue(string $text, ?string $reference = null): ?string
+    {
+        $values = [];
+        foreach (explode("\n", $this->normalize($text)) as $line) {
+            $line = preg_replace('/^[|I]\s+(?=[A-Z])/', '', $line);
+            if ($line !== '' && preg_match('/^[A-Z0-9][A-Z0-9 \/().-]*$/', $line)) {
+                $values[] = $line;
+            }
+        }
+        $counts = array_count_values($values);
+        foreach ($counts as $value => $count) {
+            if ($reference !== null && preg_match('/\b([A-Z]{2,5})$/', (string) $value, $suffix) && preg_match('/\b'.preg_quote($suffix[1], '/').'\b/', $reference)) {
+                $counts[$value] += 4;
+            }
+            if ($reference !== null && preg_match('/^\d{2,4}$/', (string) $value) && preg_match('/\b'.preg_quote((string) $value, '/').'\b/', $reference)) {
+                $counts[$value] += 4;
+            }
+        }
+        arsort($counts);
+
+        $value = array_key_first($counts);
+
+        return $value === null ? null : (string) $value;
     }
 
     private function hasValidCheckDigit(string $serial): bool

@@ -3,6 +3,7 @@
 use App\Actions\MotorcycleSerialRequests\ExtractSerialsFromWorkbook;
 use App\Actions\MotorcycleSerialRequests\ExportProductLineSerials;
 use App\Actions\MotorcycleSerialRequests\StoreDuplicateSerialWorkbook;
+use App\Actions\Products\MatchProductSerial;
 use App\Models\MotorcycleSerialRequest;
 use App\Models\MotorcycleSerialRequestLineSerial;
 use App\Models\Product;
@@ -309,17 +310,26 @@ new class extends Component
                 ->unique();
             $productsByCode = Product::query()
                 ->where('category', $this->category)
-                ->whereIn('brand', ['bera', 'zontes'])
+                ->whereIn('brand', ['bera', 'zontes', 'morini'])
                 ->whereNotNull('niv')
                 ->get(['id', 'name', 'brand', 'niv'])
                 ->groupBy(fn (Product $product): string => $product->brand.':'.Str::upper(trim((string) $product->niv)));
             $serialsByProduct = collect();
             $matchedProducts = collect();
             $ignoredSerialCount = 0;
+            $matcher = app(MatchProductSerial::class);
 
             foreach ($serials as $serial) {
-                $matchingProducts = $productsByCode->get('bera:'.substr($serial, 3, 2), collect())
-                    ->concat($productsByCode->get('zontes:'.substr($serial, 0, 8), collect()));
+                $matchingProducts = collect();
+                foreach (['bera', 'zontes', 'morini'] as $brand) {
+                    if ($matcher->brand($serial) !== null && $matcher->brand($serial) !== $brand) {
+                        continue;
+                    }
+                    $code = $matcher->code($serial, $brand);
+                    if ($code !== null) {
+                        $matchingProducts = $matchingProducts->concat($productsByCode->get($brand.':'.$code, collect()));
+                    }
+                }
 
                 if ($matchingProducts->count() > 1) {
                     throw new \RuntimeException("El serial {$serial} coincide con más de un producto de la categoría seleccionada. Corrige el maestro de productos antes de importar.");
@@ -571,6 +581,28 @@ new class extends Component
             ? MotorcycleSerialRequestStatus::Done->value
             : MotorcycleSerialRequestStatus::InProgress->value;
 
+        if ($finalizing) {
+            $products = Product::query()->whereIn('id', collect($validated['lines'])->pluck('product_id'))->get()->keyBy('id');
+            $matcher = app(MatchProductSerial::class);
+            foreach ($validated['lines'] as $index => $line) {
+                $serials = $serialOccurrences->where('line_index', $index)->pluck('serial');
+                if ($serials->count() !== (int) $line['quantity']) {
+                    $this->addError("lines.{$index}.quantity", 'La cantidad debe coincidir con los seriales cargados antes de finalizar.');
+                }
+                foreach ($serials as $serial) {
+                    if (! $matcher->handle($products->get((int) $line['product_id']), $serial)) {
+                        $this->addError("lines.{$index}.serials", "El serial {$serial} debe tener 17 caracteres válidos y corresponder al código y la marca del producto.");
+                        break;
+                    }
+                }
+            }
+            if ($this->getErrorBag()->isNotEmpty()) {
+                $this->status = $this->requestId === null ? MotorcycleSerialRequestStatus::Draft->value : MotorcycleSerialRequest::query()->findOrFail($this->requestId)->status->value;
+
+                return null;
+            }
+        }
+
         [$serialRequest, $message] = DB::transaction(function () use ($validated, $finalizing): array {
             if ($this->requestId === null) {
                 $serialRequest = MotorcycleSerialRequest::create([
@@ -812,6 +844,9 @@ new class extends Component
                                 <td class="p-2">
                                     <input aria-label="Cantidad de la línea {{ $index + 1 }}" wire:model="lines.{{ $index }}.quantity" type="number" min="1" step="1" @disabled($this->areLinesReadOnly()) class="w-full border-0 bg-transparent px-3 py-2.5 outline-none focus:ring-2 focus:ring-violet-500/20 disabled:cursor-not-allowed dark:text-white">
                                     @error("lines.{$index}.quantity") <p class="px-3 pb-2 text-xs text-rose-600 dark:text-rose-300">{{ $message }}</p> @enderror
+                                    @if ($this->lineSerialCount($index) > 0 && (int) $line['quantity'] !== $this->lineSerialCount($index))
+                                        <p class="px-3 pb-2 text-xs text-amber-700 dark:text-amber-300">La cantidad no coincide con los {{ $this->lineSerialCount($index) }} seriales cargados. Revísala antes de finalizar.</p>
+                                    @endif
                                 </td>
                                 <td class="p-2">
                                     <button wire:click="openSerialModal({{ $index }})" type="button" class="inline-flex items-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 dark:border-violet-500/20 dark:bg-violet-500/10 dark:text-violet-200 dark:hover:bg-violet-500/20">

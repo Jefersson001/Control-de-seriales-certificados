@@ -14,8 +14,8 @@ uses(RefreshDatabase::class);
 test('products can be imported from the expected excel columns', function () {
     Product::factory()->create(['name' => 'Descripción existente']);
     $filePath = createProductsWorkbook([
-        ['Moto urbana', 'Primero A', 'Segundo B', 'NIV-001', 2026],
-        ['Descripción existente', 'Primero C', 'Segundo D', 'NIV-002', 2025],
+        ['Moto urbana', 'Primero A', 'Segundo B', 'AB', 2026],
+        ['Descripción existente', 'Primero C', 'Segundo D', 'CD', 2025],
         ['', '', '', '', 'año inválido'],
     ]);
 
@@ -26,7 +26,7 @@ test('products can be imported from the expected excel columns', function () {
         'name' => 'Moto urbana',
         'first_value' => 'Primero A',
         'second_value' => 'Segundo B',
-        'niv' => 'NIV-001',
+        'niv' => 'AB',
         'year' => 2026,
     ]);
 
